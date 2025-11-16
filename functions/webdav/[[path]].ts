@@ -1,4 +1,4 @@
-import { notFound, parseBucketPath } from "./utils";
+import { notFound, parseBucketPath, verifyTwoFactorPin } from "./utils";
 import { handleRequestCopy } from "./copy";
 import { handleRequestDelete } from "./delete";
 import { handleRequestGet } from "./get";
@@ -39,9 +39,11 @@ const HANDLERS: Record<
 };
 
 export const onRequest: PagesFunction<{
-  WEBDAV_USERNAME: string;
-  WEBDAV_PASSWORD: string;
+  WEBDAV_USERNAME?: string;
+  WEBDAV_PASSWORD?: string;
   WEBDAV_PUBLIC_READ?: string;
+  WEBDAV_2FA_SECRET?: string;
+  WEBDAV_2FA_WINDOW?: string;
 }> = async function (context) {
   const env = context.env;
   const request: Request = context.request;
@@ -52,20 +54,64 @@ export const onRequest: PagesFunction<{
     ["GET", "HEAD", "PROPFIND"].includes(request.method);
 
   if (!skipAuth) {
-    if (!env.WEBDAV_USERNAME || !env.WEBDAV_PASSWORD)
+    const configuredUsername = env.WEBDAV_USERNAME;
+    const configuredPassword = env.WEBDAV_PASSWORD;
+    const twoFaSecret = env.WEBDAV_2FA_SECRET;
+    const windowOverride = env.WEBDAV_2FA_WINDOW;
+
+    const hasPasswordAuth = Boolean(configuredUsername && configuredPassword);
+    const hasTwoFactorAuth = Boolean(twoFaSecret);
+
+    if (!hasPasswordAuth && !hasTwoFactorAuth)
       return new Response("WebDAV protocol is not enabled", { status: 403 });
 
     const auth = request.headers.get("Authorization");
-    if (!auth) {
+    if (!auth || !auth.startsWith("Basic ")) {
       return new Response("Unauthorized", {
         status: 401,
         headers: { "WWW-Authenticate": `Basic realm="WebDAV"` },
       });
     }
-    const expectedAuth = `Basic ${btoa(
-      `${env.WEBDAV_USERNAME}:${env.WEBDAV_PASSWORD}`
-    )}`;
-    if (auth !== expectedAuth)
+
+    let decoded: string;
+    try {
+      decoded = atob(auth.slice("Basic ".length).trim());
+    } catch (error) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const separatorIndex = decoded.indexOf(":");
+    if (separatorIndex === -1)
+      return new Response("Unauthorized", { status: 401 });
+
+    const suppliedUsername = decoded.slice(0, separatorIndex);
+    const suppliedSecret = decoded.slice(separatorIndex + 1);
+
+    let isAuthorized = false;
+
+    if (
+      hasPasswordAuth &&
+      suppliedUsername === configuredUsername &&
+      suppliedSecret === configuredPassword
+    ) {
+      isAuthorized = true;
+    }
+
+    if (!isAuthorized && hasTwoFactorAuth) {
+      const windowSize = (() => {
+        const parsed = Number(windowOverride);
+        if (!Number.isFinite(parsed) || parsed < 1) return 3;
+        return Math.min(11, Math.floor(parsed));
+      })();
+      const isValidTwoFactor = await verifyTwoFactorPin(
+        twoFaSecret as string,
+        suppliedSecret,
+        windowSize
+      );
+      if (isValidTwoFactor) isAuthorized = true;
+    }
+
+    if (!isAuthorized)
       return new Response("Unauthorized", { status: 401 });
   }
 
