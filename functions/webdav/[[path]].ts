@@ -1,4 +1,4 @@
-import { notFound, parseBucketPath, verifyTwoFactorPin } from "./utils";
+import { notFound, parseBucketPath } from "./utils";
 import { handleRequestCopy } from "./copy";
 import { handleRequestDelete } from "./delete";
 import { handleRequestGet } from "./get";
@@ -9,6 +9,7 @@ import { handleRequestPropfind } from "./propfind";
 import { handleRequestPut } from "./put";
 import { RequestHandlerParams } from "./utils";
 import { handleRequestPost } from "./post";
+import { authenticator } from "@otplib/preset-v11";
 
 async function handleRequestOptions() {
   return new Response(null, {
@@ -98,17 +99,9 @@ export const onRequest: PagesFunction<{
     }
 
     if (!isAuthorized && hasTwoFactorAuth) {
-      const windowSize = (() => {
-        const parsed = Number(windowOverride);
-        if (!Number.isFinite(parsed) || parsed < 1) return 3;
-        return Math.min(11, Math.floor(parsed));
-      })();
-      const isValidTwoFactor = await verifyTwoFactorPin(
-        twoFaSecret as string,
-        suppliedSecret,
-        windowSize
-      );
-      if (isValidTwoFactor) isAuthorized = true;
+      authenticator.options = {window: parseInt(windowOverride as string)}
+      const isValid2FA = authenticator.check(suppliedSecret,twoFaSecret as string);
+      if (isValid2FA) isAuthorized = true;
     }
 
     if (!isAuthorized)
