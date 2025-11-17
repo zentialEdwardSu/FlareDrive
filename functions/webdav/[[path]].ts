@@ -98,7 +98,7 @@ export const onRequest: PagesFunction<{
     }
 
     if (!isAuthorized && hasTwoFactorAuth) {
-      const isValid2FA = await verifyTOTP(twoFaSecret as string,suppliedSecret, windowOverride ? parseInt(windowOverride) : 0);
+      const isValid2FA = await verifyTOTP(suppliedSecret,twoFaSecret as string, windowOverride ? parseInt(windowOverride) : 0);
       if (isValid2FA) isAuthorized = true;
     }
 

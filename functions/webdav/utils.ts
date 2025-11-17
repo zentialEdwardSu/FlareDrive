@@ -51,7 +51,7 @@ export async function generateTOTP(secretBase32: string, forTime?: number, digit
 }
 
 // Base32 decode
-function base32ToBytes(base32: string): Uint8Array {
+function base32ToBytes(base32: string): Uint8Array<ArrayBuffer> {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let bits = "";
   for (const char of base32.replace(/=+$/, "")) {
