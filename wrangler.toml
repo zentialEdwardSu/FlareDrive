@@ -1,0 +1,4 @@
+name= "FlareDrive"
+compatibility_date = "2025-12-12"
+
+compatibility_flags = ["node_compat"]
