@@ -7,9 +7,8 @@ import { handleRequestMkcol } from "./mkcol";
 import { handleRequestMove } from "./move";
 import { handleRequestPropfind } from "./propfind";
 import { handleRequestPut } from "./put";
-import { RequestHandlerParams } from "./utils";
+import { RequestHandlerParams,verifyTOTP } from "./utils";
 import { handleRequestPost } from "./post";
-import { authenticator } from "@otplib/preset-v11";
 
 async function handleRequestOptions() {
   return new Response(null, {
@@ -99,8 +98,7 @@ export const onRequest: PagesFunction<{
     }
 
     if (!isAuthorized && hasTwoFactorAuth) {
-      authenticator.options = {window: parseInt(windowOverride as string)}
-      const isValid2FA = authenticator.check(suppliedSecret,twoFaSecret as string);
+      const isValid2FA = await verifyTOTP(twoFaSecret as string,suppliedSecret, windowOverride ? parseInt(windowOverride) : 0);
       if (isValid2FA) isAuthorized = true;
     }
 
