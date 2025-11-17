@@ -28,7 +28,7 @@ Steps:
 1. Fork this project and connect your fork with Cloudflare Pages
    - Select `Docusaurus` framework preset
    - Set `WEBDAV_USERNAME` and `WEBDAV_PASSWORD`
-  - (Optional) Set `WEBDAV_2FA_SECRET` (Base32 TOTP seed) to allow 6-digit PIN sign-in; adjust `WEBDAV_2FA_WINDOW` to tolerate clock drift
+  - (Optional) Set `WEBDAV_2FA_SECRET` (Base32 TOTP seed) to allow 6-digit PIN sign-in; adjust `WEBDAV_2FA_WINDOW` to tolerate clock drift.
    - (Optional) Set `WEBDAV_PUBLIC_READ` to `1` to enable public read
 2. After initial deployment, bind your R2 bucket to `BUCKET` variable
 3. Retry deployment in `Deployments` page to apply the changes
