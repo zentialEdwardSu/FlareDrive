@@ -1,4 +1,0 @@
-name= "flaredrive"
-compatibility_date = "2025-12-12"
-
-compatibility_flags = ["nodejs_compat"]
