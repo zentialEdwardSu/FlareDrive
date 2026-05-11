@@ -47,6 +47,8 @@ function FileIcon({ file, size = 36 }: { file: FileItem; size?: number }) {
     <img
       src={`/webdav/_$flaredrive$/thumbnails/${file.customMetadata.thumbnail}.png`}
       alt={extractFilename(file.key)}
+      loading="lazy"
+      decoding="async"
       style={{ width: size, height: size, objectFit: "cover" }}
     />
   ) : (

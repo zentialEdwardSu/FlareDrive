@@ -234,6 +234,14 @@ export async function copyPaste(source: string, target: string, move = false) {
   if (!response.ok) throw new Error(await response.text());
 }
 
+export async function createShareLink(key: string) {
+  const response = await webdavFetch(`${WEBDAV_ENDPOINT}${encodeKey(key)}?share`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<{ url: string; token: string }>;
+}
+
 export async function createFolder(cwd: string) {
   try {
     const folderName = window.prompt("Folder name");

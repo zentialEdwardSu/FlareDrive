@@ -1,4 +1,11 @@
-import { notFound, parseBucketPath } from "./utils";
+import {
+  hasValidTOTPHeader,
+  isDirectoryObject,
+  isInternalPath,
+  isSensitivePath,
+  notFound,
+  parseBucketPath,
+} from "./utils";
 import { handleRequestCopy } from "./copy";
 import { handleRequestDelete } from "./delete";
 import { handleRequestGet } from "./get";
@@ -16,7 +23,8 @@ type WebDavEnv = AuthEnv & {
   WEBDAV_PASSWORD?: string;
   AUTH_SESSION_SECRET?: string;
   AUTH_SESSION_SECONDS?: string;
-  WEBDAV_PUBLIC_READ?: string;
+  WEBDAV_2FA_SECRET?: string;
+  WEBDAV_2FA_WINDOW?: string;
 };
 
 async function handleRequestOptions() {
@@ -58,22 +66,38 @@ const HANDLERS: Record<
   DELETE: handleRequestDelete,
 };
 
+async function hasValidShareToken(bucket: R2Bucket, path: string, request: Request) {
+  if (isInternalPath(path)) return false;
+  if (!["GET", "HEAD"].includes(request.method)) return false;
+
+  const token = new URL(request.url).searchParams.get("share");
+  if (!token) return false;
+
+  const object = await bucket.head(path);
+  return Boolean(
+    object &&
+      !isDirectoryObject(object) &&
+      object.customMetadata?.shareToken &&
+      object.customMetadata.shareToken === token
+  );
+}
+
 export const onRequest: PagesFunction<{
   WEBDAV_USERNAME?: string;
   WEBDAV_PASSWORD?: string;
   AUTH_SESSION_SECRET?: string;
   AUTH_SESSION_SECONDS?: string;
-  WEBDAV_PUBLIC_READ?: string;
+  WEBDAV_2FA_SECRET?: string;
+  WEBDAV_2FA_WINDOW?: string;
 }> = async function (context) {
   const env = context.env as WebDavEnv;
   const request: Request = context.request;
   if (request.method === "OPTIONS") return handleRequestOptions();
 
   const [bucket, path] = parseBucketPath(context);
+  if (!bucket) return notFound();
 
-  const skipAuth =
-    env.WEBDAV_PUBLIC_READ === "1" &&
-    ["GET", "HEAD", "PROPFIND"].includes(request.method);
+  const skipAuth = await hasValidShareToken(bucket, path, request);
 
   if (!skipAuth) {
     const configuredUsername = env.WEBDAV_USERNAME;
@@ -109,9 +133,15 @@ export const onRequest: PagesFunction<{
     }
   }
 
-  if (!bucket) return notFound();
-
   const method: string = (context.request as Request).method;
+  if (
+    ["DELETE", "MOVE"].includes(method) &&
+    isSensitivePath(path) &&
+    !(await hasValidTOTPHeader(request, env))
+  ) {
+    return new Response("TOTP required", { status: 403 });
+  }
+
   const handler = HANDLERS[method] ?? handleMethodNotAllowed;
   return handler({ bucket, path, request: context.request });
 };

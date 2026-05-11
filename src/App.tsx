@@ -14,6 +14,7 @@ import Main from "./Main";
 import ProgressDialog from "./ProgressDialog";
 import { TransferQueueProvider } from "./app/transferQueue";
 import { AuthSession, getAuthSession, logout, registerPasskey } from "./app/auth";
+import { clearThumbnailCache } from "./app/thumbnailCacheServiceWorker";
 
 const globalStyles = (
   <GlobalStyles
@@ -75,6 +76,7 @@ function App() {
 
   const handleLogout = async () => {
     try {
+      await clearThumbnailCache();
       await logout();
       refreshAuthSession();
     } catch (error) {

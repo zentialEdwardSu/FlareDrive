@@ -6,6 +6,7 @@ export interface RequestHandlerParams {
 }
 
 export const WEBDAV_ENDPOINT = "/webdav/";
+export const INTERNAL_PREFIX = "_$flaredrive$/";
 
 export const ROOT_OBJECT = {
   key: "",
@@ -76,6 +77,76 @@ export async function verifyTOTP(userPIN: string, secret: string, window = 1) {
   return false;
 }
 
+export async function hasValidTOTPHeader(request: Request, env: {
+  WEBDAV_2FA_SECRET?: string;
+  WEBDAV_2FA_WINDOW?: string;
+}) {
+  const secret = env.WEBDAV_2FA_SECRET;
+  const token = request.headers.get("X-FlareDrive-TOTP") ?? "";
+  if (!secret || !token) return false;
+  return verifyTOTP(token, secret, parseIntegerEnv(env.WEBDAV_2FA_WINDOW, 0));
+}
+
+export function parseIntegerEnv(value: string | undefined, fallback: number) {
+  if (value === undefined) return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+export function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+export function isDirectoryObject(object: Pick<R2Object, "httpMetadata"> | typeof ROOT_OBJECT) {
+  return object.httpMetadata?.contentType === "application/x-directory";
+}
+
+export function isInternalPath(path: string) {
+  return path.startsWith(INTERNAL_PREFIX);
+}
+
+export function isSensitivePath(path: string) {
+  return path === "" || isInternalPath(path);
+}
+
+export function isDangerousInlineContentType(contentType: string | undefined) {
+  const normalized = contentType?.split(";")[0]?.trim().toLowerCase();
+  return Boolean(
+    normalized &&
+      [
+        "application/javascript",
+        "application/ecmascript",
+        "application/xhtml+xml",
+        "image/svg+xml",
+        "text/ecmascript",
+        "text/html",
+        "text/javascript",
+        "text/xml",
+      ].includes(normalized)
+  );
+}
+
+export function applySafeObjectHeaders(headers: Headers) {
+  headers.set("X-Content-Type-Options", "nosniff");
+  if (isDangerousInlineContentType(headers.get("Content-Type") ?? undefined)) {
+    headers.set("Content-Disposition", "attachment");
+    headers.set("Content-Security-Policy", "sandbox");
+  }
+}
+
+export function randomShareToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 
 export function notFound() {
   return new Response("Not found", { status: 404 });
@@ -110,7 +181,7 @@ export async function* listAll(
     });
 
     for await (const obj of r2Objects.objects)
-      if (!obj.key.startsWith("_$flaredrive$/")) yield obj;
+      if (!isInternalPath(obj.key)) yield obj;
 
     truncated = r2Objects.truncated;
     cursor = truncated ? (r2Objects as any).cursor : undefined;

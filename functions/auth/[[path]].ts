@@ -235,19 +235,32 @@ async function handleStatus(request: Request, env: AuthEnv, bucket: R2Bucket) {
 }
 
 async function handlePasswordLogin(request: Request, env: AuthEnv) {
-  const body = (await request.json()) as { username?: string; password?: string };
+  const body = (await request.json()) as {
+    username?: string;
+    password?: string;
+    totp?: string;
+  };
   const username = body.username ?? "";
   const password = body.password ?? "";
+  const totp = body.totp ?? "";
 
   const passwordOk =
     Boolean(env.WEBDAV_USERNAME && env.WEBDAV_PASSWORD) &&
     username === env.WEBDAV_USERNAME &&
     password === env.WEBDAV_PASSWORD;
-  const totpOk = env.WEBDAV_2FA_SECRET
-    ? await verifyTOTP(password, env.WEBDAV_2FA_SECRET, parseIntegerEnv(env.WEBDAV_2FA_WINDOW, 0))
-    : false;
+  const hasTotp = Boolean(env.WEBDAV_2FA_SECRET);
+  const totpOk = hasTotp
+    ? await verifyTOTP(totp || password, env.WEBDAV_2FA_SECRET!, parseIntegerEnv(env.WEBDAV_2FA_WINDOW, 0))
+    : true;
+  const directTotpOk =
+    env.WEBDAV_TOTP_DIRECT_LOGIN === "1" &&
+    hasTotp &&
+    !username &&
+    (await verifyTOTP(password || totp, env.WEBDAV_2FA_SECRET!, parseIntegerEnv(env.WEBDAV_2FA_WINDOW, 0)));
 
-  if (!passwordOk && !totpOk) return json({ error: "Unauthorized" }, { status: 401 });
+  if (!directTotpOk && !(passwordOk && totpOk)) {
+    return json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   return json(
     { authenticated: true },
@@ -275,7 +288,7 @@ async function handleRegisterOptions(request: Request, env: AuthEnv, bucket: R2B
     attestation: "none",
     authenticatorSelection: {
       residentKey: "preferred",
-      userVerification: "preferred",
+      userVerification: "required",
     },
   });
 }
@@ -301,6 +314,9 @@ async function handleRegisterVerify(request: Request, env: AuthEnv, bucket: R2Bu
   }
 
   const parsed = parseAuthenticatorData(authData);
+  if ((parsed.flags & 0x04) === 0) {
+    return json({ error: "User verification is required" }, { status: 401 });
+  }
   if (!parsed.credentialId || !parsed.publicKeyJwk) return json({ error: "Missing public key" }, { status: 400 });
   if (credential.rawId !== base64UrlEncode(parsed.credentialId)) {
     return json({ error: "Credential ID mismatch" }, { status: 400 });
@@ -332,7 +348,7 @@ async function handleLoginOptions(request: Request, bucket: R2Bucket) {
       id: credential.id,
     })),
     timeout: CHALLENGE_SECONDS * 1000,
-    userVerification: "preferred",
+    userVerification: "required",
   });
 }
 
@@ -380,6 +396,12 @@ async function handleLoginVerify(request: Request, env: AuthEnv, bucket: R2Bucke
   if (!ok) return json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = parseAuthenticatorData(authenticatorData);
+  if ((parsed.flags & 0x04) === 0) {
+    return json({ error: "User verification is required" }, { status: 401 });
+  }
+  if (parsed.signCount !== 0 && stored.signCount !== 0 && parsed.signCount <= stored.signCount) {
+    return json({ error: "Authenticator sign counter regression" }, { status: 401 });
+  }
   if (parsed.signCount > stored.signCount) {
     await saveCredential(bucket, { ...stored, signCount: parsed.signCount });
   }

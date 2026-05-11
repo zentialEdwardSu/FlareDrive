@@ -1,5 +1,4 @@
-import { notFound } from "./utils";
-import { RequestHandlerParams } from "./utils";
+import { applySafeObjectHeaders, notFound, RequestHandlerParams } from "./utils";
 
 export async function handleRequestHead({
   bucket,
@@ -10,5 +9,6 @@ export async function handleRequestHead({
 
   const headers = new Headers();
   obj.writeHttpMetadata(headers);
+  applySafeObjectHeaders(headers);
   return new Response(null, { headers });
 }

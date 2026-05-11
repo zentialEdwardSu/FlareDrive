@@ -10,6 +10,7 @@ export type AuthEnv = {
   WEBDAV_PASSWORD?: string;
   WEBDAV_2FA_SECRET?: string;
   WEBDAV_2FA_WINDOW?: string;
+  WEBDAV_TOTP_DIRECT_LOGIN?: string;
   BUCKET?: R2Bucket;
   [key: string]: unknown;
 };
@@ -131,4 +132,3 @@ export async function readSession(request: Request, env: AuthEnv) {
 export async function hasValidSession(request: Request, env: AuthEnv) {
   return Boolean(await readSession(request, env));
 }
-

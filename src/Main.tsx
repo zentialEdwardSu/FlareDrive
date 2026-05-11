@@ -28,7 +28,7 @@ import MultiSelectToolbar from "./MultiSelectToolbar";
 import UploadDrawer, { UploadFab } from "./UploadDrawer";
 import TextPadDrawer from "./TextPadDrawer";
 import { webdavFetch } from "./app/auth";
-import { copyPaste, createFolder, fetchPath } from "./app/transfer";
+import { copyPaste, createFolder, createShareLink, fetchPath } from "./app/transfer";
 import {
   useDownloadEnqueue,
   useTransferQueue,
@@ -473,13 +473,18 @@ function Main({
             await webdavFetch(`/webdav/${encodeKey(key)}`, { method: "DELETE" });
           fetchFiles();
         }}
-        onShare={() => {
+        onShare={async () => {
           if (multiSelected?.length !== 1) return;
-          const url = new URL(
-            `/webdav/${encodeKey(multiSelected[0])}`,
-            window.location.href
-          );
-          navigator.share({ url: url.toString() });
+          try {
+            const share = await createShareLink(multiSelected[0]);
+            if (navigator.share) {
+              await navigator.share({ url: share.url });
+            } else {
+              await navigator.clipboard.writeText(share.url);
+            }
+          } catch (error) {
+            onError(error as Error);
+          }
         }}
       />
     </>

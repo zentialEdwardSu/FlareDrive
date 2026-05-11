@@ -77,10 +77,10 @@ export async function getAuthSession(): Promise<AuthSession> {
   return response.json();
 }
 
-export async function passwordLogin(username: string, password: string) {
+export async function passwordLogin(username: string, password: string, totp: string) {
   await authFetch("login/password", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, totp }),
   });
 }
 

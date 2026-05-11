@@ -1,5 +1,10 @@
 import { notFound } from "./utils";
-import { RequestHandlerParams } from "./utils";
+import {
+  isDirectoryObject,
+  isInternalPath,
+  randomShareToken,
+  RequestHandlerParams,
+} from "./utils";
 
 export async function handleRequestPostCreateMultipart({
   bucket,
@@ -40,6 +45,36 @@ export async function handleRequestPostCompleteMultipart({
   }
 }
 
+async function handleRequestPostCreateShare({
+  bucket,
+  path,
+  request,
+}: RequestHandlerParams) {
+  if (isInternalPath(path)) return new Response("Forbidden", { status: 403 });
+
+  const object = await bucket.get(path);
+  if (object === null) return notFound();
+  if (isDirectoryObject(object)) {
+    return new Response("Cannot share folders", { status: 400 });
+  }
+
+  const token = object.customMetadata?.shareToken ?? randomShareToken();
+  await bucket.put(path, object.body, {
+    httpMetadata: object.httpMetadata,
+    customMetadata: {
+      ...object.customMetadata,
+      shareToken: token,
+    },
+  });
+
+  const url = new URL(request.url);
+  url.search = "";
+  url.searchParams.set("share", token);
+  return new Response(JSON.stringify({ url: url.toString(), token }), {
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export const handleRequestPost = async function ({
   bucket,
   path,
@@ -54,6 +89,10 @@ export const handleRequestPost = async function ({
 
   if (searchParams.has("uploadId")) {
     return handleRequestPostCompleteMultipart({ bucket, path, request });
+  }
+
+  if (searchParams.has("share")) {
+    return handleRequestPostCreateShare({ bucket, path, request });
   }
 
   return new Response("Method not allowed", { status: 405 });

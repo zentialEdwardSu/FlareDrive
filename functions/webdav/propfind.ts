@@ -1,4 +1,6 @@
 import {
+  escapeXml,
+  isDirectoryObject,
   listAll,
   RequestHandlerParams,
   ROOT_OBJECT,
@@ -26,10 +28,7 @@ function fromR2Object(object: R2Object | typeof ROOT_OBJECT): DavProperties {
     getcontenttype: object.httpMetadata?.contentType,
     getetag: object.etag,
     getlastmodified: object.uploaded.toUTCString(),
-    resourcetype:
-      object.httpMetadata?.contentType === "application/x-directory"
-        ? "<collection />"
-        : "",
+    resourcetype: isDirectoryObject(object) ? "<collection />" : "",
     "fd:thumbnail": object.customMetadata?.thumbnail,
   };
 }
@@ -84,12 +83,16 @@ export async function handleRequestPropfind({
     const properties = fromR2Object(child);
     return `
   <response>
-    <href>${encodeURI(`${WEBDAV_ENDPOINT}${child.key}`)}</href>
+    <href>${escapeXml(encodeURI(`${WEBDAV_ENDPOINT}${child.key}`))}</href>
     <propstat>
       <prop>
         ${Object.entries(properties)
           .filter(([_, value]) => value !== undefined)
-          .map(([key, value]) => `<${key}>${value}</${key}>`)
+          .map(([key, value]) =>
+            key === "resourcetype"
+              ? `<${key}>${value}</${key}>`
+              : `<${key}>${escapeXml(value ?? "")}</${key}>`
+          )
           .join("\n")}
       </prop>
       <status>HTTP/1.1 200 OK</status>

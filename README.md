@@ -1,40 +1,42 @@
 # FlareDrive
 
-Cloudflare R2 storage manager with Pages and Workers. Free 10 GB storage.
-Free serverless backend with a limit of 100,000 invocation requests per day.
-[More about pricing](https://developers.cloudflare.com/r2/platform/pricing/)
+Cloudflare R2 storage manager with a Pages frontend and Functions WebDAV backend.
+Cloudflare R2 includes a free 10 GB storage tier, and Pages Functions include a free
+serverless request allowance. See the official Cloudflare pricing pages for current
+limits and costs.
 
 ## Features
 
-- Upload large files
+- Upload large files through the web interface
 - Create folders
 - Search files
-- Image/video/PDF thumbnails
-- WebDAV endpoint
+- Image, video, and PDF thumbnails
+- WebDAV endpoint for third-party clients
 - Drag and drop upload
+- Passkey login for the web interface
+- Explicit single-file share links
 
-## Usage
+## Installation
 
-### Installation
+Before starting, make sure that:
 
-Before starting, you should make sure that
-
-- you have created a [Cloudflare](https://dash.cloudflare.com/) account
-- your payment method is added
-- R2 service is activated and at least one bucket is created
+- You have created a Cloudflare account
+- Your payment method is added
+- R2 is activated and at least one bucket is created
 
 Steps:
 
-1. Fork this project and connect your fork with Cloudflare Pages
-   - Select `Docusaurus` framework preset
-   - Set `WEBDAV_USERNAME` and `WEBDAV_PASSWORD`
-   - (Optional) Set `WEBDAV_2FA_SECRET` (Base32 TOTP seed) to allow 6-digit PIN sign-in on the web login page; adjust `WEBDAV_2FA_WINDOW` to tolerate clock drift.
-   - (Optional) Set `AUTH_SESSION_SECRET` to sign web login cookies. If omitted, `WEBDAV_PASSWORD` is used.
-   - (Optional) Set `AUTH_SESSION_SECONDS` to control web login persistence. The default is `2592000` seconds.
-   - (Optional) Set `WEBDAV_PUBLIC_READ` to `1` to enable public read
-2. After initial deployment, bind your R2 bucket to `BUCKET` variable
-3. Retry deployment in `Deployments` page to apply the changes
-4. (Optional) Add a custom domain
+1. Fork this project and connect your fork with Cloudflare Pages.
+   - Select the `Docusaurus` framework preset.
+   - Set `WEBDAV_USERNAME` and `WEBDAV_PASSWORD`.
+   - Optional: set `WEBDAV_2FA_SECRET` to a Base32 TOTP seed. When configured, web password login requires both the password and a current TOTP code.
+   - Optional: set `WEBDAV_2FA_WINDOW` to tolerate clock drift. The default is `0`.
+   - Optional: set `WEBDAV_TOTP_DIRECT_LOGIN=1` to allow TOTP-only web login. This is disabled by default.
+   - Optional: set `AUTH_SESSION_SECRET` to sign web login cookies. If omitted, `WEBDAV_PASSWORD` is used.
+   - Optional: set `AUTH_SESSION_SECONDS` to control web login persistence. The default is `2592000` seconds.
+2. After the initial deployment, bind your R2 bucket to the `BUCKET` variable.
+3. Retry deployment from the Cloudflare Pages `Deployments` page to apply the binding and variables.
+4. Optional: add a custom domain.
 
 You can also deploy this project using Wrangler CLI:
 
@@ -43,23 +45,47 @@ npm run build
 npx wrangler pages deploy build
 ```
 
-### WebDAV endpoint
+## WebDAV Endpoint
 
-You can use any client (such as [Cx File Explorer](https://play.google.com/store/apps/details?id=com.cxinventor.file.explorer), [BD File Manager](https://play.google.com/store/apps/details?id=com.liuzho.file.explorer))
-that supports the WebDAV protocol to access your files.
-Fill the endpoint URL as `https://<your-domain.com>/webdav` and use the username and password you set. WebDAV clients use account/password Basic authentication only.
+Use a WebDAV client such as Cx File Explorer, BD File Manager, Cyberduck, Mountain Duck, or the client built into your operating system.
 
-### Web login
+Endpoint:
 
-The web interface supports account/password login, optional TOTP login, and passkey quick login. Sign in with account/password first, then open the menu and choose `Add passkey`. Future browser logins can use `Sign in with passkey`. A successful password, TOTP, or passkey login creates a persistent web session cookie controlled by `AUTH_SESSION_SECONDS`.
+```text
+https://<your-domain.com>/webdav
+```
 
-However, the standard WebDAV protocol does not support large file (≥128MB) uploads due to the limitation of Cloudflare Workers.
-You must upload large files through the web interface which supports chunked uploads.
+WebDAV clients authenticate with `WEBDAV_USERNAME` and `WEBDAV_PASSWORD` using Basic authentication. TOTP is not required for normal WebDAV client access, because many third-party clients do not support multi-factor prompts.
+
+The standard WebDAV protocol path does not support large uploads above the Cloudflare Workers request body limit. Use the web interface for large files; it uses multipart uploads.
+
+## Web Login
+
+The web interface supports:
+
+- Username and password
+- Username, password, and TOTP when `WEBDAV_2FA_SECRET` is configured
+- Optional TOTP-only login when `WEBDAV_TOTP_DIRECT_LOGIN=1`
+- Passkey login after registering a passkey from the menu
+
+Passkeys require user verification. A successful web login creates a persistent session cookie controlled by `AUTH_SESSION_SECONDS`.
+
+## Sharing
+
+Public read access is not enabled globally. The app supports explicit single-file share links instead.
+
+Use the web interface share action on one selected file to create a link containing a random share token. The resulting URL uses `?share=<token>` and allows unauthenticated `GET` or `HEAD` access to that file only. Folders, directory listings, internal objects, writes, deletes, and moves are not exposed through share links.
+
+## Security Notes
+
+- Dangerous inline content types such as HTML, SVG, JavaScript, and XML are served as downloads with `X-Content-Type-Options: nosniff`.
+- WebDAV `PROPFIND` XML values are escaped before being returned to clients.
+- Deleting or moving sensitive internal objects requires a valid `X-FlareDrive-TOTP` header when `WEBDAV_2FA_SECRET` is configured.
+- Thumbnail images use lazy loading and private cache headers. The thumbnail service worker does not serve cached private thumbnails as an offline fallback.
+- `AUTH_SESSION_SECRET` is recommended for production deployments even though the app can fall back to `WEBDAV_PASSWORD`.
 
 ## Acknowledgments
 
-WebDAV related code is based on [r2-webdav](
-  https://github.com/abersheeran/r2-webdav
-) project by [abersheeran](
-  https://github.com/abersheeran
-).
+WebDAV related code is based on the
+[r2-webdav](https://github.com/abersheeran/r2-webdav) project by
+[abersheeran](https://github.com/abersheeran).

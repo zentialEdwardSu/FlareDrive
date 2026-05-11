@@ -15,6 +15,7 @@ function Login({
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const [loading, setLoading] = useState(false);
 
   const runAuth = async (action: () => Promise<void>) => {
@@ -31,7 +32,7 @@ function Login({
 
   const handlePasswordLogin = (event: FormEvent) => {
     event.preventDefault();
-    runAuth(() => passwordLogin(username, password));
+    runAuth(() => passwordLogin(username, password, totp));
   };
 
   return (
@@ -72,10 +73,20 @@ function Login({
           fullWidth
         />
         <TextField
-          label="Password or TOTP"
+          label="Password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           autoComplete="current-password"
+          type="password"
+          size="small"
+          fullWidth
+        />
+        <TextField
+          label="TOTP code"
+          value={totp}
+          onChange={(event) => setTotp(event.target.value)}
+          autoComplete="one-time-code"
+          inputMode="numeric"
           type="password"
           size="small"
           fullWidth
@@ -104,4 +115,3 @@ function Login({
 }
 
 export default Login;
-
