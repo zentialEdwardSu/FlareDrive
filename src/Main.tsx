@@ -7,7 +7,9 @@ import {
   Link,
   Stack,
   Typography,
+  useMediaQuery,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import {
   CreateNewFolder as CreateNewFolderIcon,
   Home as HomeIcon,
@@ -32,7 +34,6 @@ import {
   useTransferQueue,
   useUploadEnqueue,
 } from "./app/transferQueue";
-import { ViewMode } from "./app/viewMode";
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
@@ -206,11 +207,9 @@ function DropZone({
 
 function Main({
   search,
-  viewMode,
   onError,
 }: {
   search: string;
-  viewMode: ViewMode;
   onError: (error: Error) => void;
 }) {
   const [cwd, setCwd] = useState("");
@@ -221,7 +220,8 @@ function Main({
   const [showTextPadDrawer, setShowTextPadDrawer] = useState(false);
   const [lastUploadKey, setLastUploadKey] = useState<string | null>(null);
 
-  const isWebView = viewMode === "web";
+  const theme = useTheme();
+  const showInlineActions = useMediaQuery(theme.breakpoints.up("md"));
   const transferQueue = useTransferQueue();
   const uploadEnqueue = useUploadEnqueue();
   const downloadEnqueue = useDownloadEnqueue();
@@ -350,7 +350,7 @@ function Main({
             </Typography>
           </Box>
         )}
-        {isWebView && (
+        {showInlineActions && (
           <Stack direction="row" spacing={1} sx={{ padding: 1 }}>
             <Button
               size="small"
@@ -405,7 +405,6 @@ function Main({
         >
           <FileGrid
             files={filteredFiles}
-            viewMode={viewMode}
             onCwdChange={(newCwd: string) => setCwd(newCwd)}
             multiSelected={multiSelected}
             onMultiSelect={handleMultiSelect}
@@ -416,7 +415,7 @@ function Main({
         </DropZone>
       )}
 
-      {multiSelected === null && !isWebView && (
+      {multiSelected === null && !showInlineActions && (
         <>
           <UploadFab onClick={() => setShowUploadDrawer(true)} />
           <Button

@@ -14,7 +14,6 @@ import Main from "./Main";
 import ProgressDialog from "./ProgressDialog";
 import { TransferQueueProvider } from "./app/transferQueue";
 import { AuthSession, getAuthSession, logout, registerPasskey } from "./app/auth";
-import { VIEW_MODE_STORAGE_KEY, ViewMode } from "./app/viewMode";
 
 const globalStyles = (
   <GlobalStyles
@@ -56,10 +55,6 @@ function App() {
   const [showProgressDialog, setShowProgressDialog] = React.useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
-    return stored === "mobile" ? "mobile" : "web";
-  });
 
   const refreshAuthSession = () => {
     getAuthSession()
@@ -68,10 +63,6 @@ function App() {
   };
 
   useEffect(refreshAuthSession, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
-  }, [viewMode]);
 
   const handleRegisterPasskey = async () => {
     try {
@@ -101,13 +92,11 @@ function App() {
             <Header
               search={search}
               onSearchChange={(newSearch: string) => setSearch(newSearch)}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
               setShowProgressDialog={setShowProgressDialog}
               onRegisterPasskey={handleRegisterPasskey}
               onLogout={handleLogout}
             />
-            <Main search={search} viewMode={viewMode} onError={setError} />
+            <Main search={search} onError={setError} />
           </Stack>
         ) : (
           <Login
