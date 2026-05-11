@@ -7,8 +7,6 @@ import {
   Link,
   Stack,
   Typography,
-  useMediaQuery,
-  useTheme,
 } from "@mui/material";
 import {
   CreateNewFolder as CreateNewFolderIcon,
@@ -18,7 +16,12 @@ import {
   Upload as UploadIcon,
 } from "@mui/icons-material";
 
-import FileGrid, { encodeKey, FileItem, isDirectory } from "./FileGrid";
+import FileGrid, {
+  encodeKey,
+  FileItem,
+  FILE_DRAG_TYPE,
+  isDirectory,
+} from "./FileGrid";
 import MultiSelectToolbar from "./MultiSelectToolbar";
 import UploadDrawer, { UploadFab } from "./UploadDrawer";
 import TextPadDrawer from "./TextPadDrawer";
@@ -29,6 +32,7 @@ import {
   useTransferQueue,
   useUploadEnqueue,
 } from "./app/transferQueue";
+import { ViewMode } from "./app/viewMode";
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
@@ -48,20 +52,70 @@ function Centered({ children }: { children: React.ReactNode }) {
 function PathBreadcrumb({
   path,
   onCwdChange,
+  onMove,
 }: {
   path: string;
   onCwdChange: (newCwd: string) => void;
+  onMove: (sourceKey: string, targetDirectory: string) => void;
 }) {
   const parts = path.replace(/\/$/, "").split("/");
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const handleDragOver = (
+    event: React.DragEvent,
+    targetDirectory: string
+  ) => {
+    if (!Array.from(event.dataTransfer.types).includes(FILE_DRAG_TYPE)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget(targetDirectory);
+  };
+
+  const handleDrop = (event: React.DragEvent, targetDirectory: string) => {
+    const sourceKey = event.dataTransfer.getData(FILE_DRAG_TYPE);
+    if (!sourceKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTarget(null);
+    onMove(sourceKey, targetDirectory);
+  };
+
+  const dropSx = (targetDirectory: string) => ({
+    minWidth: 0,
+    padding: "2px 4px",
+    outline:
+      dropTarget === targetDirectory
+        ? "2px solid #FF4F00"
+        : "2px solid transparent",
+    outlineOffset: 1,
+  });
 
   return (
     <Breadcrumbs separator="/" sx={{ padding: 1 }}>
-      <Button onClick={() => onCwdChange("")} sx={{ minWidth: 0, padding: 0 }}>
+      <Button
+        onClick={() => onCwdChange("")}
+        onDragOver={(event) => handleDragOver(event, "")}
+        onDragLeave={() => setDropTarget(null)}
+        onDrop={(event) => handleDrop(event, "")}
+        sx={dropSx("")}
+      >
         <HomeIcon />
       </Button>
       {parts.map((part, index) =>
         index === parts.length - 1 ? (
-          <Typography key={index} color="text.primary">
+          <Typography
+            key={index}
+            color="text.primary"
+            onDragOver={(event) =>
+              handleDragOver(event, parts.slice(0, index + 1).join("/") + "/")
+            }
+            onDragLeave={() => setDropTarget(null)}
+            onDrop={(event) =>
+              handleDrop(event, parts.slice(0, index + 1).join("/") + "/")
+            }
+            sx={dropSx(parts.slice(0, index + 1).join("/") + "/")}
+          >
             {part}
           </Typography>
         ) : (
@@ -71,6 +125,14 @@ function PathBreadcrumb({
             onClick={() => {
               onCwdChange(parts.slice(0, index + 1).join("/") + "/");
             }}
+            onDragOver={(event) =>
+              handleDragOver(event, parts.slice(0, index + 1).join("/") + "/")
+            }
+            onDragLeave={() => setDropTarget(null)}
+            onDrop={(event) =>
+              handleDrop(event, parts.slice(0, index + 1).join("/") + "/")
+            }
+            sx={dropSx(parts.slice(0, index + 1).join("/") + "/")}
           >
             {part}
           </Link>
@@ -89,6 +151,10 @@ function DropZone({
 }) {
   const [dragging, setDragging] = useState(false);
 
+  const isExternalFileDrag = (event: React.DragEvent) =>
+    Array.from(event.dataTransfer.types).includes("Files") &&
+    !Array.from(event.dataTransfer.types).includes(FILE_DRAG_TYPE);
+
   return (
     <Box
       sx={{
@@ -98,15 +164,18 @@ function DropZone({
         backgroundColor: (theme) => theme.palette.background.default,
       }}
       onDragEnter={(event) => {
+        if (!isExternalFileDrag(event)) return;
         event.preventDefault();
         setDragging(true);
       }}
       onDragOver={(event) => {
+        if (!isExternalFileDrag(event)) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={(event) => {
+        if (!isExternalFileDrag(event)) return;
         event.preventDefault();
         onDrop(event.dataTransfer.files);
         setDragging(false);
@@ -137,9 +206,11 @@ function DropZone({
 
 function Main({
   search,
+  viewMode,
   onError,
 }: {
   search: string;
+  viewMode: ViewMode;
   onError: (error: Error) => void;
 }) {
   const [cwd, setCwd] = useState("");
@@ -150,8 +221,7 @@ function Main({
   const [showTextPadDrawer, setShowTextPadDrawer] = useState(false);
   const [lastUploadKey, setLastUploadKey] = useState<string | null>(null);
 
-  const theme = useTheme();
-  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
+  const isWebView = viewMode === "web";
   const transferQueue = useTransferQueue();
   const uploadEnqueue = useUploadEnqueue();
   const downloadEnqueue = useDownloadEnqueue();
@@ -218,6 +288,41 @@ function Main({
     [downloadEnqueue, files]
   );
 
+  const handleMove = useCallback(
+    async (sourceKey: string, targetDirectory: string) => {
+      const sourceFile = files.find((file) => file.key === sourceKey);
+      const normalizedSourceKey = sourceKey.replace(/\/$/, "");
+      const sourceName = normalizedSourceKey.split("/").pop();
+      if (!sourceFile || !sourceName) return;
+
+      const normalizedTargetDirectory = targetDirectory
+        ? `${targetDirectory.replace(/\/$/, "")}/`
+        : "";
+      const sourceDirectory = normalizedSourceKey.includes("/")
+        ? normalizedSourceKey.slice(0, normalizedSourceKey.lastIndexOf("/") + 1)
+        : "";
+      const nextKey = `${normalizedTargetDirectory}${sourceName}`;
+
+      if (nextKey === normalizedSourceKey) return;
+      if (
+        isDirectory(sourceFile) &&
+        normalizedTargetDirectory.startsWith(`${normalizedSourceKey}/`)
+      ) {
+        window.alert("Cannot move a folder into itself.");
+        return;
+      }
+      if (sourceDirectory === normalizedTargetDirectory) return;
+
+      try {
+        await copyPaste(sourceKey, nextKey, true);
+        fetchFiles();
+      } catch (error) {
+        onError(error as Error);
+      }
+    },
+    [fetchFiles, files, onError]
+  );
+
   return (
     <>
       <Stack
@@ -232,15 +337,20 @@ function Main({
         }}
       >
         {cwd ? (
-          <PathBreadcrumb path={cwd} onCwdChange={setCwd} />
+          <PathBreadcrumb path={cwd} onCwdChange={setCwd} onMove={handleMove} />
         ) : (
-          <Box sx={{ padding: 1 }}>
+          <Box
+            sx={{
+              padding: 1,
+              outline: "2px solid transparent",
+            }}
+          >
             <Typography variant="body2" color="text.secondary">
               Root
             </Typography>
           </Box>
         )}
-        {isDesktop && (
+        {isWebView && (
           <Stack direction="row" spacing={1} sx={{ padding: 1 }}>
             <Button
               size="small"
@@ -295,16 +405,18 @@ function Main({
         >
           <FileGrid
             files={filteredFiles}
+            viewMode={viewMode}
             onCwdChange={(newCwd: string) => setCwd(newCwd)}
             multiSelected={multiSelected}
             onMultiSelect={handleMultiSelect}
             onDownload={(file) => enqueueDownload(file.key)}
+            onMove={handleMove}
             emptyMessage={<Centered>No files or folders</Centered>}
           />
         </DropZone>
       )}
 
-      {multiSelected === null && !isDesktop && (
+      {multiSelected === null && !isWebView && (
         <>
           <UploadFab onClick={() => setShowUploadDrawer(true)} />
           <Button
@@ -376,4 +488,3 @@ function Main({
 }
 
 export default Main;
-

@@ -5,24 +5,35 @@ import {
   InputBase,
   Menu,
   MenuItem,
+  ToggleButton,
+  ToggleButtonGroup,
   Toolbar,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { useState } from "react";
 import {
+  DesktopWindows as DesktopWindowsIcon,
   MoreHoriz as MoreHorizIcon,
+  Smartphone as SmartphoneIcon,
   SyncAlt as SyncAltIcon,
 } from "@mui/icons-material";
+
+import { ViewMode } from "./app/viewMode";
 
 function Header({
   search,
   onSearchChange,
+  viewMode,
+  onViewModeChange,
   setShowProgressDialog,
   onRegisterPasskey,
   onLogout,
 }: {
   search: string;
   onSearchChange: (newSearch: string) => void;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
   setShowProgressDialog: (show: boolean) => void;
   onRegisterPasskey: () => void;
   onLogout: () => void;
@@ -71,6 +82,49 @@ function Header({
           padding: "6px 12px",
         }}
       />
+      <ToggleButtonGroup
+        exclusive
+        size="small"
+        value={viewMode}
+        onChange={(_event, nextMode: ViewMode | null) => {
+          if (nextMode) onViewModeChange(nextMode);
+        }}
+        sx={{
+          border: "1px solid #D1D5DB",
+          borderRadius: 1,
+          flex: "0 0 auto",
+          "& .MuiToggleButton-root": {
+            gap: 0.75,
+            border: 0,
+            borderRadius: 0,
+            paddingX: { xs: 1, sm: 1.5 },
+            color: "text.secondary",
+            textTransform: "none",
+            whiteSpace: "nowrap",
+          },
+          "& .Mui-selected": {
+            backgroundColor: "#FF4F00 !important",
+            color: "#FFFFFF !important",
+          },
+        }}
+      >
+        <ToggleButton value="web" aria-label="Web view">
+          <Tooltip title="Web">
+            <DesktopWindowsIcon fontSize="small" />
+          </Tooltip>
+          <Box component="span" sx={{ display: { xs: "none", md: "inline" } }}>
+            Web
+          </Box>
+        </ToggleButton>
+        <ToggleButton value="mobile" aria-label="Mobile view">
+          <Tooltip title="Mobile">
+            <SmartphoneIcon fontSize="small" />
+          </Tooltip>
+          <Box component="span" sx={{ display: { xs: "none", md: "inline" } }}>
+            Mobile
+          </Box>
+        </ToggleButton>
+      </ToggleButtonGroup>
       <Button
         variant="outlined"
         startIcon={<SyncAltIcon />}
@@ -125,4 +179,3 @@ function Header({
 }
 
 export default Header;
-

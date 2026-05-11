@@ -227,10 +227,11 @@ export async function copyPaste(source: string, target: string, move = false) {
     `${WEBDAV_ENDPOINT}${encodeKey(target)}`,
     window.location.href
   );
-  await webdavFetch(uploadUrl, {
+  const response = await webdavFetch(uploadUrl, {
     method: move ? "MOVE" : "COPY",
     headers: { Destination: destinationUrl.href },
   });
+  if (!response.ok) throw new Error(await response.text());
 }
 
 export async function createFolder(cwd: string) {
