@@ -1,6 +1,6 @@
 import React, { forwardRef, useCallback, useMemo } from "react";
 
-import { Button, Card, Drawer, Fab, Grid, Typography } from "@mui/material";
+import { Box, Button, Drawer, Fab, Stack, Typography } from "@mui/material";
 import {
   Camera as CameraIcon,
   CreateNewFolder as CreateNewFolderIcon,
@@ -89,11 +89,10 @@ function UploadDrawer({
         const files = Array.from(input.files);
         uploadEnqueue(...files.map((file) => ({ file, basedir: cwd })));
         setOpen(false);
-        onUpload();
       };
       input.click();
     },
-    [cwd, onUpload, setOpen, uploadEnqueue]
+    [cwd, setOpen, uploadEnqueue]
   );
 
   const takePhoto = useMemo(() => handleUpload("photo"), [handleUpload]);
@@ -105,44 +104,51 @@ function UploadDrawer({
       anchor="bottom"
       open={open}
       onClose={() => setOpen(false)}
-      PaperProps={{ sx: { borderRadius: "16px 16px 0 0" } }}
+      PaperProps={{ sx: { borderRadius: "8px 8px 0 0" } }}
     >
-      <Card sx={{ padding: 2 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={3}>
+      <Box sx={{ padding: 2 }}>
+        <Typography variant="h6" sx={{ marginBottom: 1 }}>
+          Upload
+        </Typography>
+        <Stack
+          direction="row"
+          spacing={1}
+          sx={{ overflowX: "auto", paddingBottom: 1 }}
+        >
+          <Box sx={{ minWidth: 96 }}>
             <IconCaptionButton
               icon={<CameraIcon fontSize="large" />}
               caption="Camera"
               onClick={takePhoto}
             />
-          </Grid>
-          <Grid item xs={3}>
+          </Box>
+          <Box sx={{ minWidth: 96 }}>
             <IconCaptionButton
               icon={<ImageIcon fontSize="large" />}
-              caption="Image/Video"
+              caption="Image/video"
               onClick={uploadImage}
             />
-          </Grid>
-          <Grid item xs={3}>
+          </Box>
+          <Box sx={{ minWidth: 96 }}>
             <IconCaptionButton
               icon={<UploadIcon fontSize="large" />}
-              caption="Upload"
+              caption="Files"
               onClick={uploadFile}
             />
-          </Grid>
-          <Grid item xs={3}>
+          </Box>
+          <Box sx={{ minWidth: 96 }}>
             <IconCaptionButton
               icon={<CreateNewFolderIcon fontSize="large" />}
-              caption="Create Folder"
+              caption="Folder"
               onClick={async () => {
                 setOpen(false);
                 await createFolder(cwd);
                 onUpload();
               }}
             />
-          </Grid>
-        </Grid>
-      </Card>
+          </Box>
+        </Stack>
+      </Box>
     </Drawer>
   );
 }

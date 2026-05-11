@@ -1,4 +1,3 @@
-// Main.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
@@ -6,18 +5,31 @@ import {
   Button,
   CircularProgress,
   Link,
+  Stack,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
-import { Home as HomeIcon, NoteAdd as NoteAddIcon } from "@mui/icons-material";
+import {
+  CreateNewFolder as CreateNewFolderIcon,
+  Home as HomeIcon,
+  NoteAdd as NoteAddIcon,
+  Refresh as RefreshIcon,
+  Upload as UploadIcon,
+} from "@mui/icons-material";
 
 import FileGrid, { encodeKey, FileItem, isDirectory } from "./FileGrid";
 import MultiSelectToolbar from "./MultiSelectToolbar";
 import UploadDrawer, { UploadFab } from "./UploadDrawer";
 import TextPadDrawer from "./TextPadDrawer";
-import { copyPaste, fetchPath } from "./app/transfer";
-import { useTransferQueue, useUploadEnqueue } from "./app/transferQueue";
+import { webdavFetch } from "./app/auth";
+import { copyPaste, createFolder, fetchPath } from "./app/transfer";
+import {
+  useDownloadEnqueue,
+  useTransferQueue,
+  useUploadEnqueue,
+} from "./app/transferQueue";
 
-// Centered helper
 function Centered({ children }: { children: React.ReactNode }) {
   return (
     <Box
@@ -33,7 +45,6 @@ function Centered({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Breadcrumb component
 function PathBreadcrumb({
   path,
   onCwdChange,
@@ -44,7 +55,7 @@ function PathBreadcrumb({
   const parts = path.replace(/\/$/, "").split("/");
 
   return (
-    <Breadcrumbs separator="›" sx={{ padding: 1 }}>
+    <Breadcrumbs separator="/" sx={{ padding: 1 }}>
       <Button onClick={() => onCwdChange("")} sx={{ minWidth: 0, padding: 0 }}>
         <HomeIcon />
       </Button>
@@ -69,7 +80,6 @@ function PathBreadcrumb({
   );
 }
 
-// DropZone wrapper
 function DropZone({
   children,
   onDrop,
@@ -82,33 +92,49 @@ function DropZone({
   return (
     <Box
       sx={{
+        position: "relative",
         flexGrow: 1,
         overflowY: "auto",
         backgroundColor: (theme) => theme.palette.background.default,
-        filter: dragging ? "brightness(0.9)" : "none",
-        transition: "filter 0.2s",
       }}
-      onDragEnter={(e) => {
-        e.preventDefault();
+      onDragEnter={(event) => {
+        event.preventDefault();
         setDragging(true);
       }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
       }}
       onDragLeave={() => setDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDrop(e.dataTransfer.files);
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop(event.dataTransfer.files);
         setDragging(false);
       }}
     >
+      {dragging && (
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 12,
+            zIndex: 10,
+            display: "grid",
+            placeItems: "center",
+            border: "2px solid #FF4F00",
+            backgroundColor: "rgba(255, 255, 255, 0.92)",
+            pointerEvents: "none",
+          }}
+        >
+          <Typography variant="h5" sx={{ fontWeight: 700 }}>
+            Drop files to upload
+          </Typography>
+        </Box>
+      )}
       {children}
     </Box>
   );
 }
 
-// Main Component
 function Main({
   search,
   onError,
@@ -124,8 +150,11 @@ function Main({
   const [showTextPadDrawer, setShowTextPadDrawer] = useState(false);
   const [lastUploadKey, setLastUploadKey] = useState<string | null>(null);
 
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up("md"));
   const transferQueue = useTransferQueue();
   const uploadEnqueue = useUploadEnqueue();
+  const downloadEnqueue = useDownloadEnqueue();
 
   const fetchFiles = useCallback(() => {
     fetchPath(cwd)
@@ -144,9 +173,11 @@ function Main({
   }, [fetchFiles]);
 
   useEffect(() => {
-    if (!transferQueue.length) return;
-    const lastFile = transferQueue[transferQueue.length - 1];
-    if (["pending", "in-progress"].includes(lastFile.status)) {
+    const lastFile = [...transferQueue]
+      .reverse()
+      .find((task) => task.type === "upload");
+    if (!lastFile) return;
+    if (["queued", "in-progress"].includes(lastFile.status)) {
       setLastUploadKey(lastFile.remoteKey);
     } else if (lastUploadKey) {
       fetchFiles();
@@ -176,9 +207,79 @@ function Main({
     });
   }, []);
 
+  const enqueueDownload = useCallback(
+    (key: string) => {
+      const selectedFile = files.find((file) => file.key === key);
+      downloadEnqueue({
+        remoteKey: key,
+        total: selectedFile?.size,
+      });
+    },
+    [downloadEnqueue, files]
+  );
+
   return (
     <>
-      {cwd && <PathBreadcrumb path={cwd} onCwdChange={setCwd} />}
+      <Stack
+        direction={{ xs: "column", md: "row" }}
+        alignItems={{ xs: "stretch", md: "center" }}
+        justifyContent="space-between"
+        sx={{
+          borderTop: "1px solid #E5E7EB",
+          borderBottom: "1px solid #D1D5DB",
+          backgroundColor: "#FFFFFF",
+          paddingX: { xs: 0, md: 1 },
+        }}
+      >
+        {cwd ? (
+          <PathBreadcrumb path={cwd} onCwdChange={setCwd} />
+        ) : (
+          <Box sx={{ padding: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Root
+            </Typography>
+          </Box>
+        )}
+        {isDesktop && (
+          <Stack direction="row" spacing={1} sx={{ padding: 1 }}>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<UploadIcon />}
+              onClick={() => setShowUploadDrawer(true)}
+            >
+              Upload
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<CreateNewFolderIcon />}
+              onClick={async () => {
+                await createFolder(cwd);
+                fetchFiles();
+              }}
+            >
+              New folder
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<NoteAddIcon />}
+              onClick={() => setShowTextPadDrawer(true)}
+            >
+              TextPad
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={fetchFiles}
+            >
+              Refresh
+            </Button>
+          </Stack>
+        )}
+      </Stack>
 
       {loading ? (
         <Centered>
@@ -197,12 +298,13 @@ function Main({
             onCwdChange={(newCwd: string) => setCwd(newCwd)}
             multiSelected={multiSelected}
             onMultiSelect={handleMultiSelect}
+            onDownload={(file) => enqueueDownload(file.key)}
             emptyMessage={<Centered>No files or folders</Centered>}
           />
         </DropZone>
       )}
 
-      {multiSelected === null && (
+      {multiSelected === null && !isDesktop && (
         <>
           <UploadFab onClick={() => setShowUploadDrawer(true)} />
           <Button
@@ -216,7 +318,7 @@ function Main({
             }}
             onClick={() => setShowTextPadDrawer(true)}
           >
-            Open TextPad
+            TextPad
           </Button>
         </>
       )}
@@ -240,10 +342,7 @@ function Main({
         onClose={() => setMultiSelected(null)}
         onDownload={() => {
           if (multiSelected?.length !== 1) return;
-          const a = document.createElement("a");
-          a.href = `/webdav/${encodeKey(multiSelected[0])}`;
-          a.download = multiSelected[0].split("/").pop()!;
-          a.click();
+          enqueueDownload(multiSelected[0]);
         }}
         onRename={async () => {
           if (multiSelected?.length !== 1) return;
@@ -260,7 +359,7 @@ function Main({
           const confirmMessage = "Delete the following file(s) permanently?";
           if (!window.confirm(`${confirmMessage}\n${filenames}`)) return;
           for (const key of multiSelected)
-            await fetch(`/webdav/${encodeKey(key)}`, { method: "DELETE" });
+            await webdavFetch(`/webdav/${encodeKey(key)}`, { method: "DELETE" });
           fetchFiles();
         }}
         onShare={() => {
@@ -277,3 +376,4 @@ function Main({
 }
 
 export default Main;
+

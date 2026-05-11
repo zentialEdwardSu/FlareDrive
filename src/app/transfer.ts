@@ -1,12 +1,13 @@
 import pLimit from "p-limit";
 
 import { encodeKey, FileItem } from "../FileGrid";
+import { webdavFetch } from "./auth";
 import { TransferTask } from "./transferQueue";
 
 const WEBDAV_ENDPOINT = "/webdav/";
 
 export async function fetchPath(path: string) {
-  const res = await fetch(`${WEBDAV_ENDPOINT}${encodeKey(path)}`, {
+  const res = await webdavFetch(`${WEBDAV_ENDPOINT}${encodeKey(path)}`, {
     method: "PROPFIND",
     headers: { Depth: "1" },
   });
@@ -125,6 +126,7 @@ function xhrFetch(
       url instanceof Request ? url.url : url
     );
     const headers = new Headers(requestInit.headers);
+    headers.set("X-FlareDrive-Web-Auth", "1");
     headers.forEach((value, key) => xhr.setRequestHeader(key, value));
     xhr.onload = () => {
       const headers = xhr
@@ -162,7 +164,7 @@ export async function multipartUpload(
   const headers = options?.headers || {};
   headers["content-type"] = file.type;
 
-  const uploadResponse = await fetch(`/webdav/${encodeKey(key)}?uploads`, {
+  const uploadResponse = await webdavFetch(`/webdav/${encodeKey(key)}?uploads`, {
     headers,
     method: "POST",
   });
@@ -211,7 +213,7 @@ export async function multipartUpload(
   );
   const uploadedParts = await Promise.all(promises);
   const completeParams = new URLSearchParams({ uploadId });
-  const response = await fetch(`/webdav/${encodeKey(key)}?${completeParams}`, {
+  const response = await webdavFetch(`/webdav/${encodeKey(key)}?${completeParams}`, {
     method: "POST",
     body: JSON.stringify({ parts: uploadedParts }),
   });
@@ -225,7 +227,7 @@ export async function copyPaste(source: string, target: string, move = false) {
     `${WEBDAV_ENDPOINT}${encodeKey(target)}`,
     window.location.href
   );
-  await fetch(uploadUrl, {
+  await webdavFetch(uploadUrl, {
     method: move ? "MOVE" : "COPY",
     headers: { Destination: destinationUrl.href },
   });
@@ -241,7 +243,7 @@ export async function createFolder(cwd: string) {
     }
     const folderKey = `${cwd}${folderName}`;
     const uploadUrl = `${WEBDAV_ENDPOINT}${encodeKey(folderKey)}`;
-    await fetch(uploadUrl, { method: "MKCOL" });
+    await webdavFetch(uploadUrl, { method: "MKCOL" });
   } catch (error) {
     console.log(`Create folder failed`);
   }
@@ -254,8 +256,21 @@ export async function processTransferTask({
   task: TransferTask;
   onTaskProgress?: (event: { loaded: number; total: number }) => void;
 }) {
+  if (task.type === "download") {
+    const anchor = document.createElement("a");
+    anchor.href = `${WEBDAV_ENDPOINT}${encodeKey(task.remoteKey)}`;
+    anchor.download = task.name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    return {
+      status: "started" as const,
+      loaded: task.total,
+    };
+  }
+
   const { remoteKey, file } = task;
-  if (task.type !== "upload" || !file) throw new Error("Invalid task");
+  if (!file) throw new Error("Invalid task");
   let thumbnailDigest = null;
 
   if (
@@ -269,7 +284,7 @@ export async function processTransferTask({
 
       const thumbnailUploadUrl = `/webdav/_$flaredrive$/thumbnails/${digestHex}.png`;
       try {
-        await fetch(thumbnailUploadUrl, {
+        await webdavFetch(thumbnailUploadUrl, {
           method: "PUT",
           body: thumbnailBlob,
         });
@@ -285,17 +300,21 @@ export async function processTransferTask({
   const headers: { "fd-thumbnail"?: string } = {};
   if (thumbnailDigest) headers["fd-thumbnail"] = thumbnailDigest;
   if (file.size >= SIZE_LIMIT) {
-    return await multipartUpload(remoteKey, file, {
+    await multipartUpload(remoteKey, file, {
       headers,
       onUploadProgress: onTaskProgress,
     });
   } else {
     const uploadUrl = `${WEBDAV_ENDPOINT}${encodeKey(remoteKey)}`;
-    return await xhrFetch(uploadUrl, {
+    await xhrFetch(uploadUrl, {
       method: "PUT",
       headers,
       body: file,
       onUploadProgress: onTaskProgress,
     });
   }
+  return {
+    status: "completed" as const,
+    loaded: file.size,
+  };
 }
