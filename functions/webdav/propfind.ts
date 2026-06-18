@@ -42,6 +42,8 @@ async function findChildren({
   path: string;
   depth: string;
 }) {
+  // depth "1" => immediate children (ResourceAndChildren),
+  // "infinity" => full subtree (ResourceAndAncestors).
   if (!["1", "infinity"].includes(depth)) return [];
 
   const objects: Array<R2Object> = [];
@@ -54,6 +56,15 @@ async function findChildren({
   return objects;
 }
 
+// Normalize the Depth header to one of "0" | "1" | "infinity".
+// Maps the WebDavClient ApplyTo values: ResourceOnly => 0,
+// ResourceAndChildren => 1, ResourceAndAncestors => infinity.
+function normalizeDepth(rawDepth: string | null) {
+  const value = (rawDepth ?? "infinity").trim().toLowerCase();
+  if (value === "0" || value === "1") return value;
+  return "infinity";
+}
+
 export async function handleRequestPropfind({
   bucket,
   path,
@@ -64,18 +75,51 @@ export async function handleRequestPropfind({
 {{items}}
 </multistatus>`;
 
-  const rootObject = path === "" ? ROOT_OBJECT : await bucket.head(path);
+  // Clients list a collection by requesting it with a trailing slash
+  // (e.g. /webdav/folder/). Normalize so we resolve the stored key.
+  const normalizedPath = path.replace(/\/+$/, "");
+  const hadTrailingSlash = path !== normalizedPath;
+
+  let rootObject: R2Object | typeof ROOT_OBJECT | null =
+    normalizedPath === "" ? ROOT_OBJECT : await bucket.head(normalizedPath);
+
+  // No explicit object: it may still be an implied (virtual) collection,
+  // i.e. a prefix that has children but no x-directory placeholder.
+  let isImpliedCollection = false;
+  if (!rootObject) {
+    const probe = await bucket.list({
+      prefix: `${normalizedPath}/`,
+      delimiter: "/",
+      // @ts-ignore
+      include: ["httpMetadata", "customMetadata"],
+    });
+    if (probe.objects.length > 0 || probe.delimitedPrefixes.length > 0) {
+      isImpliedCollection = true;
+      rootObject = {
+        ...ROOT_OBJECT,
+        key: normalizedPath,
+      };
+    }
+  }
+
   if (!rootObject) return new Response("Not found", { status: 404 });
+
   const isDirectory =
     rootObject === ROOT_OBJECT ||
+    isImpliedCollection ||
     rootObject.httpMetadata?.contentType === "application/x-directory";
-  const depth = request.headers.get("Depth") ?? "infinity";
+
+  // A trailing slash on a non-collection is not a valid resource.
+  if (hadTrailingSlash && !isDirectory)
+    return new Response("Not found", { status: 404 });
+
+  const depth = normalizeDepth(request.headers.get("Depth"));
 
   const children = !isDirectory
     ? []
     : await findChildren({
         bucket,
-        path,
+        path: normalizedPath,
         depth,
       });
 

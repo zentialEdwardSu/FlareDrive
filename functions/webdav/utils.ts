@@ -152,6 +152,37 @@ export function notFound() {
   return new Response("Not found", { status: 404 });
 }
 
+export const WEBDAV_METHODS = [
+  "OPTIONS",
+  "PROPFIND",
+  "MKCOL",
+  "HEAD",
+  "GET",
+  "POST",
+  "PUT",
+  "COPY",
+  "MOVE",
+  "DELETE",
+];
+
+// Write ETag and Last-Modified validators so clients can cache and revalidate.
+export function applyValidatorHeaders(
+  headers: Headers,
+  object: Pick<R2Object, "httpEtag" | "uploaded">
+) {
+  if (object.httpEtag) headers.set("ETag", object.httpEtag);
+  if (object.uploaded) headers.set("Last-Modified", object.uploaded.toUTCString());
+}
+
+// Does the request carry a precondition that, when it fails, means
+// "not modified" (a validation conditional) rather than a hard precondition?
+export function isValidationConditional(request: Request) {
+  return (
+    request.headers.has("If-None-Match") ||
+    request.headers.has("If-Modified-Since")
+  );
+}
+
 export function parseBucketPath(context: any): [R2Bucket, string] {
   const { request, env, params } = context;
   const url = new URL(request.url);

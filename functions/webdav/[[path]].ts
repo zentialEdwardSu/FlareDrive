@@ -5,6 +5,7 @@ import {
   isSensitivePath,
   notFound,
   parseBucketPath,
+  WEBDAV_METHODS,
 } from "./utils";
 import { handleRequestCopy } from "./copy";
 import { handleRequestDelete } from "./delete";
@@ -30,14 +31,17 @@ type WebDavEnv = AuthEnv & {
 async function handleRequestOptions() {
   return new Response(null, {
     headers: {
-      Allow: Object.keys(HANDLERS).join(", "),
-      DAV: "1",
+      Allow: WEBDAV_METHODS.join(", "),
+      DAV: "1, 2",
     },
   });
 }
 
 async function handleMethodNotAllowed() {
-  return new Response(null, { status: 405 });
+  return new Response("Method Not Allowed", {
+    status: 405,
+    headers: { Allow: WEBDAV_METHODS.join(", ") },
+  });
 }
 
 function unauthorized(request: Request) {
