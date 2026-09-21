@@ -154,6 +154,7 @@ function FileTile({
   onMultiSelect,
   onDownload,
   onMove,
+  onContextMenu,
 }: FileGridProps & {
   file: FileItem;
   layout: FileLayout["kind"];
@@ -213,7 +214,8 @@ function FileTile({
       }}
       onContextMenu={(event) => {
         event.preventDefault();
-        onMultiSelect(file.key);
+        if (onContextMenu) onContextMenu(event, file);
+        else onMultiSelect(file.key);
       }}
       sx={{
         position: "relative",
@@ -341,6 +343,7 @@ type FileGridProps = {
   onMultiSelect: (key: string) => void;
   onDownload?: (file: FileItem) => void;
   onMove?: (sourceKey: string, targetDirectory: string) => void;
+  onContextMenu?: (event: React.MouseEvent, file: FileItem) => void;
   emptyMessage?: React.ReactNode;
 };
 

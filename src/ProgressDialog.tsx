@@ -1,9 +1,6 @@
 import {
   Box,
   Button,
-  Dialog,
-  DialogContent,
-  DialogTitle,
   Divider,
   Drawer,
   IconButton,
@@ -11,6 +8,7 @@ import {
   List,
   ListItem,
   ListItemText,
+  Paper,
   Stack,
   Tab,
   Tabs,
@@ -19,7 +17,7 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircleOutline as CheckCircleOutlineIcon,
   Close as CloseIcon,
@@ -27,6 +25,8 @@ import {
   HourglassEmpty as HourglassEmptyIcon,
   OpenInBrowser as OpenInBrowserIcon,
   Replay as ReplayIcon,
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  KeyboardArrowUp as KeyboardArrowUpIcon,
 } from "@mui/icons-material";
 
 import {
@@ -35,15 +35,7 @@ import {
   useTransferQueue,
 } from "./app/transferQueue";
 import { humanReadableSize } from "./app/utils";
-
-function statusText(task: TransferTask) {
-  if (task.status === "queued") return "Queued";
-  if (task.status === "in-progress") return task.type === "upload" ? "Uploading" : "Preparing";
-  if (task.status === "started") return "Started in browser";
-  if (task.status === "completed") return "Completed";
-  if (task.status === "cancelled") return "Cancelled";
-  return "Failed";
-}
+import { transferStatusText } from "./app/transferStatus";
 
 function taskProgress(task: TransferTask) {
   if (!task.total) return 0;
@@ -66,9 +58,11 @@ function TaskIcon({ task }: { task: TransferTask }) {
 function TransferTaskRow({ task }: { task: TransferTask }) {
   const { retryTask, cancelTask } = useTransferActions();
   const progress = taskProgress(task);
-  const sizeLabel = task.total
+  const sizeLabel = task.type === "download" && task.status === "started"
+    ? "Browser download"
+    : task.total
     ? `${humanReadableSize(task.loaded)} / ${humanReadableSize(task.total)}`
-    : statusText(task);
+    : transferStatusText(task);
 
   return (
     <ListItem
@@ -104,13 +98,13 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
           <Stack spacing={0.75} sx={{ paddingRight: 6, paddingTop: 0.5 }}>
             <Stack direction="row" justifyContent="space-between" spacing={1}>
               <Typography variant="caption" color="text.secondary">
-                {statusText(task)}
+                {transferStatusText(task)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
                 {sizeLabel}
               </Typography>
             </Stack>
-            {["queued", "in-progress"].includes(task.status) && (
+            {task.type === "upload" && ["queued", "in-progress"].includes(task.status) && (
               <LinearProgress
                 variant={task.total ? "determinate" : "indeterminate"}
                 value={progress}
@@ -168,31 +162,78 @@ function TransferContent() {
   );
 }
 
-function TransferMiniTray({ onOpen }: { onOpen: () => void }) {
-  const transferQueue = useTransferQueue();
-  const active = transferQueue.filter((task) =>
-    ["queued", "in-progress"].includes(task.status)
-  );
+function transferSummary(transferQueue: TransferTask[]) {
+  const active = transferQueue.filter((task) => ["queued", "in-progress"].includes(task.status));
   const failed = transferQueue.filter((task) => task.status === "failed");
+  const uploads = active.filter((task) => task.type === "upload" && task.total > 0);
+  const total = uploads.reduce((sum, task) => sum + task.total, 0);
+  const loaded = uploads.reduce((sum, task) => sum + task.loaded, 0);
+  return { active, failed, progress: total ? Math.round((loaded / total) * 100) : 0, determinate: total > 0 };
+}
+
+function MobileTransferTray({ onOpen }: { onOpen: () => void }) {
+  const transferQueue = useTransferQueue();
+  const { active, failed, progress, determinate } = transferSummary(transferQueue);
 
   if (!transferQueue.length || (!active.length && !failed.length)) return null;
 
   return (
-    <Button
-      variant="contained"
+    <Paper
+      component="button"
       onClick={onOpen}
       sx={{
         position: "fixed",
-        right: { xs: 16, md: 24 },
-        bottom: { xs: 80, md: 24 },
+        left: 12,
+        right: 12,
+        bottom: 76,
         zIndex: 1200,
         borderRadius: 1,
-        textTransform: "none",
-        boxShadow: "none",
+        border: "1px solid",
+        borderColor: failed.length ? "error.main" : "divider",
+        p: 1.25,
+        textAlign: "left",
+        backgroundColor: "background.paper",
       }}
     >
-      Transfers {active.length ? active.length : failed.length}
-    </Button>
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
+        <Typography variant="body2" fontWeight={600}>
+          {failed.length ? `${failed.length} transfer failed` : `${active.length} transfer${active.length === 1 ? "" : "s"} active`}
+        </Typography>
+        <Typography variant="caption">{determinate ? `${progress}%` : "View"}</Typography>
+      </Stack>
+      {active.length > 0 && (
+        <LinearProgress variant={determinate ? "determinate" : "indeterminate"} value={progress} sx={{ mt: 0.75, height: 3 }} />
+      )}
+    </Paper>
+  );
+}
+
+function DesktopTransferPanel({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }) {
+  const transferQueue = useTransferQueue();
+  const { active, failed, progress, determinate } = transferSummary(transferQueue);
+  if (!open && transferQueue.length === 0) return null;
+
+  return (
+    <Paper
+      elevation={8}
+      sx={{ position: "fixed", right: 24, bottom: 24, width: 400, maxWidth: "calc(100vw - 48px)", zIndex: 1200, overflow: "hidden", border: "1px solid", borderColor: "divider" }}
+    >
+      <Button
+        color="inherit"
+        onClick={open ? onClose : onOpen}
+        endIcon={open ? <KeyboardArrowDownIcon /> : <KeyboardArrowUpIcon />}
+        sx={{ width: "100%", justifyContent: "space-between", p: 1.5 }}
+      >
+        <Stack alignItems="flex-start">
+          <Typography variant="subtitle2">Transfers</Typography>
+          <Typography variant="caption" color={failed.length ? "error" : "text.secondary"}>
+            {active.length ? `${active.length} active${determinate ? ` · ${progress}%` : ""}` : failed.length ? `${failed.length} failed` : "All transfers finished"}
+          </Typography>
+        </Stack>
+      </Button>
+      {!open && active.length > 0 && <LinearProgress variant={determinate ? "determinate" : "indeterminate"} value={progress} />}
+      {open && <Box sx={{ maxHeight: "min(520px, 70vh)", overflowY: "auto" }}><TransferContent /></Box>}
+    </Paper>
   );
 }
 
@@ -207,33 +248,37 @@ function ProgressDialog({
 }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const transferQueue = useTransferQueue();
+  const newestTaskId = transferQueue[transferQueue.length - 1]?.id;
+  const previousTaskId = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!isMobile && newestTaskId && newestTaskId !== previousTaskId.current) onOpen();
+    previousTaskId.current = newestTaskId;
+  }, [isMobile, newestTaskId, onOpen]);
 
   return (
     <>
-      <TransferMiniTray onOpen={onOpen} />
       {isMobile ? (
-        <Drawer
-          anchor="bottom"
-          open={open}
-          onClose={onClose}
-          PaperProps={{ sx: { borderRadius: "8px 8px 0 0", maxHeight: "80vh" } }}
-        >
-          <Box sx={{ padding: 2, paddingBottom: 0 }}>
-            <Typography variant="h6">Transfers</Typography>
-          </Box>
-          <TransferContent />
-        </Drawer>
-      ) : (
-        <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-          <DialogTitle>Transfers</DialogTitle>
-          <DialogContent sx={{ padding: 0 }}>
+        <>
+          <MobileTransferTray onOpen={onOpen} />
+          <Drawer
+            anchor="bottom"
+            open={open}
+            onClose={onClose}
+            PaperProps={{ sx: { borderRadius: "8px 8px 0 0", maxHeight: "80vh" } }}
+          >
+            <Box sx={{ padding: 2, paddingBottom: 0 }}>
+              <Typography variant="h6">Transfers</Typography>
+            </Box>
             <TransferContent />
-          </DialogContent>
-        </Dialog>
+          </Drawer>
+        </>
+      ) : (
+        <DesktopTransferPanel open={open} onOpen={onOpen} onClose={onClose} />
       )}
     </>
   );
 }
 
 export default ProgressDialog;
-

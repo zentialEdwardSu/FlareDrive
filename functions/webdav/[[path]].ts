@@ -1,6 +1,5 @@
 import {
   hasValidTOTPHeader,
-  isDirectoryObject,
   isInternalPath,
   isSensitivePath,
   notFound,
@@ -18,6 +17,8 @@ import { handleRequestPut } from "./put";
 import { RequestHandlerParams } from "./utils";
 import { handleRequestPost } from "./post";
 import { AuthEnv, hasValidSession } from "../auth/utils";
+import { hasValidShare } from "../shares";
+import { driveIdFromRequest, getDatabase } from "../db";
 
 type WebDavEnv = AuthEnv & {
   WEBDAV_USERNAME?: string;
@@ -70,20 +71,13 @@ const HANDLERS: Record<
   DELETE: handleRequestDelete,
 };
 
-async function hasValidShareToken(bucket: R2Bucket, path: string, request: Request) {
+async function hasValidShareToken(db: D1Database, driveId: string, path: string, request: Request) {
   if (isInternalPath(path)) return false;
   if (!["GET", "HEAD"].includes(request.method)) return false;
 
   const token = new URL(request.url).searchParams.get("share");
   if (!token) return false;
-
-  const object = await bucket.head(path);
-  return Boolean(
-    object &&
-      !isDirectoryObject(object) &&
-      object.customMetadata?.shareToken &&
-      object.customMetadata.shareToken === token
-  );
+  return hasValidShare(db, driveId, path, token);
 }
 
 export const onRequest: PagesFunction<{
@@ -100,8 +94,15 @@ export const onRequest: PagesFunction<{
 
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
+  let db: D1Database;
+  try {
+    db = getDatabase(env);
+  } catch (error) {
+    return new Response((error as Error).message, { status: 500 });
+  }
+  const driveId = driveIdFromRequest(request, env);
 
-  const skipAuth = await hasValidShareToken(bucket, path, request);
+  const skipAuth = await hasValidShareToken(db, driveId, path, request);
 
   if (!skipAuth) {
     const configuredUsername = env.WEBDAV_USERNAME;
@@ -147,5 +148,5 @@ export const onRequest: PagesFunction<{
   }
 
   const handler = HANDLERS[method] ?? handleMethodNotAllowed;
-  return handler({ bucket, path, request: context.request });
+  return handler({ bucket, db, driveId, path, request: context.request });
 };

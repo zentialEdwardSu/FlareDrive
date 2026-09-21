@@ -1,25 +1,30 @@
-import { RequestHandlerParams, ROOT_OBJECT } from "./utils";
+import { RequestHandlerParams } from "./utils";
+import { getIndexedObject, upsertObject } from "../db";
 
 export async function handleRequestMkcol({
   bucket,
+  db,
+  driveId,
   path,
   request,
 }: RequestHandlerParams) {
   // Check if the resource already exists
-  const resource = await bucket.head(path);
+  const resource = await getIndexedObject(db, driveId, path);
   if (resource !== null) {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
   // Check if the parent directory exists
   const parentPath = path.replace(/(\/|^)[^/]*$/, "");
-  const parentDir =
-    parentPath === "" ? ROOT_OBJECT : await bucket.head(parentPath);
-  if (parentDir === null) return new Response("Conflict", { status: 409 });
+  if (parentPath !== "") {
+    const parentDir = await getIndexedObject(db, driveId, parentPath);
+    if (!parentDir?.isDirectory) return new Response("Conflict", { status: 409 });
+  }
 
-  await bucket.put(path, "", {
+  const object = await bucket.put(path, "", {
     httpMetadata: { contentType: "application/x-directory" },
   });
+  await upsertObject(db, driveId, object);
 
   return new Response("Created", { status: 201 });
 }

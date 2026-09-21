@@ -10,7 +10,9 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import {
+  Key as KeyIcon,
   MoreHoriz as MoreHorizIcon,
+  Share as ShareIcon,
   SyncAlt as SyncAltIcon,
 } from "@mui/icons-material";
 
@@ -18,13 +20,15 @@ function Header({
   search,
   onSearchChange,
   setShowProgressDialog,
-  onRegisterPasskey,
+  onManageShares,
+  onManagePasskeys,
   onLogout,
 }: {
   search: string;
   onSearchChange: (newSearch: string) => void;
   setShowProgressDialog: (show: boolean) => void;
-  onRegisterPasskey: () => void;
+  onManageShares: () => void;
+  onManagePasskeys: () => void;
   onLogout: () => void;
 }) {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -43,7 +47,7 @@ function Header({
       <Typography
         variant="h6"
         sx={{
-          display: { xs: "none", sm: "block" },
+          display: { xs: "none", md: "block" },
           fontWeight: 700,
           minWidth: 120,
         }}
@@ -52,7 +56,7 @@ function Header({
       </Typography>
       <Box
         sx={{
-          display: { xs: "none", sm: "block" },
+          display: { xs: "none", md: "block" },
           width: "1px",
           alignSelf: "stretch",
           backgroundColor: "#D1D5DB",
@@ -82,6 +86,22 @@ function Header({
       >
         Transfers
       </Button>
+      <Button
+        variant="outlined"
+        startIcon={<ShareIcon />}
+        sx={{ display: { xs: "none", sm: "inline-flex" }, whiteSpace: "nowrap" }}
+        onClick={onManageShares}
+      >
+        Shares
+      </Button>
+      <Button
+        variant="outlined"
+        startIcon={<KeyIcon />}
+        sx={{ display: { xs: "none", sm: "inline-flex" }, whiteSpace: "nowrap" }}
+        onClick={onManagePasskeys}
+      >
+        Passkeys
+      </Button>
       <IconButton
         aria-label="More"
         color="inherit"
@@ -104,12 +124,22 @@ function Header({
           Transfers
         </MenuItem>
         <MenuItem
+          sx={{ display: { xs: "flex", sm: "none" } }}
           onClick={() => {
             setAnchorEl(null);
-            onRegisterPasskey();
+            onManageShares();
           }}
         >
-          Add passkey
+          Share management
+        </MenuItem>
+        <MenuItem
+          sx={{ display: { xs: "flex", sm: "none" } }}
+          onClick={() => {
+            setAnchorEl(null);
+            onManagePasskeys();
+          }}
+        >
+          Passkey management
         </MenuItem>
         <MenuItem
           onClick={() => {

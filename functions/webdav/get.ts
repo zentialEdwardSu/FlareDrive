@@ -34,6 +34,9 @@ export async function handleRequestGet({
   applyValidatorHeaders(headers, obj);
   headers.set("Accept-Ranges", "bytes");
   applySafeObjectHeaders(headers);
+  if (new URL(request.url).searchParams.has("share")) {
+    headers.set("Cache-Control", "private, no-store");
+  }
   if (path.startsWith("_$flaredrive$/thumbnails/"))
     headers.set("Cache-Control", "private, max-age=31536000, immutable");
 

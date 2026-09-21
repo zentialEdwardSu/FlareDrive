@@ -1,6 +1,6 @@
 import React, { forwardRef, useCallback, useMemo } from "react";
 
-import { Box, Button, Drawer, Fab, Stack, Typography } from "@mui/material";
+import { Box, Button, Drawer, Fab, ListItemIcon, Menu, MenuItem, Stack, Typography } from "@mui/material";
 import {
   Camera as CameraIcon,
   CreateNewFolder as CreateNewFolderIcon,
@@ -150,6 +150,60 @@ function UploadDrawer({
         </Stack>
       </Box>
     </Drawer>
+  );
+}
+
+function useUploadPicker(cwd: string, onPicked?: () => void) {
+  const uploadEnqueue = useUploadEnqueue();
+  return useCallback(
+    (accept: string, capture?: string) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = accept;
+      if (capture) input.capture = capture;
+      input.multiple = true;
+      input.onchange = () => {
+        if (!input.files) return;
+        uploadEnqueue(...Array.from(input.files).map((file) => ({ file, basedir: cwd })));
+        onPicked?.();
+      };
+      input.click();
+    },
+    [cwd, onPicked, uploadEnqueue]
+  );
+}
+
+export function UploadMenu({
+  anchorEl,
+  onClose,
+  cwd,
+  onUpload,
+}: {
+  anchorEl: HTMLElement | null;
+  onClose: () => void;
+  cwd: string;
+  onUpload: () => void;
+}) {
+  const pick = useUploadPicker(cwd, onClose);
+  return (
+    <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={onClose}>
+      <MenuItem onClick={() => pick("image/*,video/*")}>
+        <ListItemIcon><ImageIcon fontSize="small" /></ListItemIcon>
+        Images or video
+      </MenuItem>
+      <MenuItem onClick={() => pick("*/*")}>
+        <ListItemIcon><UploadIcon fontSize="small" /></ListItemIcon>
+        Files
+      </MenuItem>
+      <MenuItem onClick={async () => {
+        onClose();
+        await createFolder(cwd);
+        onUpload();
+      }}>
+        <ListItemIcon><CreateNewFolderIcon fontSize="small" /></ListItemIcon>
+        New folder
+      </MenuItem>
+    </Menu>
   );
 }
 

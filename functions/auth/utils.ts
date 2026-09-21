@@ -4,6 +4,8 @@ const SESSION_COOKIE = "fd_session";
 const DEFAULT_SESSION_SECONDS = 30 * 24 * 60 * 60;
 
 export type AuthEnv = {
+  DB?: D1Database;
+  DRIVE_ID?: string;
   AUTH_SESSION_SECRET?: string;
   AUTH_SESSION_SECONDS?: string;
   WEBDAV_USERNAME?: string;

@@ -1,10 +1,8 @@
 import { notFound } from "./utils";
 import {
-  isDirectoryObject,
-  isInternalPath,
-  randomShareToken,
   RequestHandlerParams,
 } from "./utils";
+import { upsertObject } from "../db";
 
 export async function handleRequestPostCreateMultipart({
   bucket,
@@ -25,6 +23,8 @@ export async function handleRequestPostCreateMultipart({
 
 export async function handleRequestPostCompleteMultipart({
   bucket,
+  db,
+  driveId,
   path,
   request,
 }: RequestHandlerParams) {
@@ -37,6 +37,7 @@ export async function handleRequestPostCompleteMultipart({
 
   try {
     const object = await multipartUpload.complete(completeBody.parts);
+    await upsertObject(db, driveId, object);
     return new Response(null, {
       headers: { etag: object.httpEtag },
     });
@@ -45,54 +46,17 @@ export async function handleRequestPostCompleteMultipart({
   }
 }
 
-async function handleRequestPostCreateShare({
-  bucket,
-  path,
-  request,
-}: RequestHandlerParams) {
-  if (isInternalPath(path)) return new Response("Forbidden", { status: 403 });
-
-  const object = await bucket.get(path);
-  if (object === null) return notFound();
-  if (isDirectoryObject(object)) {
-    return new Response("Cannot share folders", { status: 400 });
-  }
-
-  const token = object.customMetadata?.shareToken ?? randomShareToken();
-  await bucket.put(path, object.body, {
-    httpMetadata: object.httpMetadata,
-    customMetadata: {
-      ...object.customMetadata,
-      shareToken: token,
-    },
-  });
-
-  const url = new URL(request.url);
-  url.search = "";
-  url.searchParams.set("share", token);
-  return new Response(JSON.stringify({ url: url.toString(), token }), {
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-export const handleRequestPost = async function ({
-  bucket,
-  path,
-  request,
-}: RequestHandlerParams) {
+export const handleRequestPost = async function (params: RequestHandlerParams) {
+  const { request } = params;
   const url = new URL(request.url);
   const searchParams = new URLSearchParams(url.search);
 
   if (searchParams.has("uploads")) {
-    return handleRequestPostCreateMultipart({ bucket, path, request });
+    return handleRequestPostCreateMultipart(params);
   }
 
   if (searchParams.has("uploadId")) {
-    return handleRequestPostCompleteMultipart({ bucket, path, request });
-  }
-
-  if (searchParams.has("share")) {
-    return handleRequestPostCreateShare({ bucket, path, request });
+    return handleRequestPostCompleteMultipart(params);
   }
 
   return new Response("Method not allowed", { status: 405 });

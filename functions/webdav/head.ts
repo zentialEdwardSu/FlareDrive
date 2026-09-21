@@ -28,6 +28,9 @@ export async function handleRequestHead({
   applyValidatorHeaders(headers, obj);
   headers.set("Accept-Ranges", "bytes");
   applySafeObjectHeaders(headers);
+  if (new URL(request.url).searchParams.has("share")) {
+    headers.set("Cache-Control", "private, no-store");
+  }
 
   // Evaluate conditionals manually (R2 head() has no onlyIf support).
   const ifNoneMatch = request.headers.get("If-None-Match");

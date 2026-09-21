@@ -1,19 +1,17 @@
 import { verifyTOTP } from "../webdav/utils";
+import { driveIdFromRequest, getDatabase } from "../db";
 import {
   AuthEnv,
   base64UrlDecode,
   base64UrlEncode,
   clearSessionCookie,
   createSessionCookie,
-  getAuthBucket,
   json,
   parseIntegerEnv,
   readSession,
   sha256,
 } from "./utils";
 
-const CHALLENGE_PREFIX = "_$flaredrive$/auth/challenges/";
-const CREDENTIAL_PREFIX = "_$flaredrive$/auth/passkeys/";
 const CHALLENGE_SECONDS = 5 * 60;
 
 type StoredCredential = {
@@ -22,6 +20,8 @@ type StoredCredential = {
   publicKeyJwk: JsonWebKey;
   signCount: number;
   createdAt: number;
+  name?: string;
+  lastUsedAt?: number;
 };
 
 function pathFromContext(context: EventContext<AuthEnv, string, unknown>) {
@@ -38,6 +38,10 @@ function rpIdFromRequest(request: Request) {
   return new URL(request.url).hostname;
 }
 
+function isSameOrigin(request: Request) {
+  return request.headers.get("Origin") === originFromRequest(request);
+}
+
 async function randomChallenge() {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -45,64 +49,144 @@ async function randomChallenge() {
 }
 
 async function challengeKey(challenge: string) {
-  return `${CHALLENGE_PREFIX}${base64UrlEncode(await sha256(challenge))}`;
+  return base64UrlEncode(await sha256(challenge));
 }
 
 async function saveChallenge(
-  bucket: R2Bucket,
+  db: D1Database,
+  driveId: string,
   challenge: string,
   type: "create" | "get",
   user: string
 ) {
-  await bucket.put(
-    await challengeKey(challenge),
-    JSON.stringify({ challenge, type, user, expiresAt: Date.now() + CHALLENGE_SECONDS * 1000 }),
-    { httpMetadata: { contentType: "application/json" } }
-  );
+  await db.batch([
+    db.prepare("DELETE FROM runtime_auth_challenges WHERE expires_at < ?").bind(Date.now()),
+    db.prepare(`INSERT OR REPLACE INTO runtime_auth_challenges
+      (drive_id, challenge_hash, challenge, type, user, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .bind(driveId, await challengeKey(challenge), challenge, type, user,
+        Date.now() + CHALLENGE_SECONDS * 1000),
+  ]);
 }
 
 async function consumeChallenge(
-  bucket: R2Bucket,
+  db: D1Database,
+  driveId: string,
   challenge: string,
   type: "create" | "get"
 ) {
   const key = await challengeKey(challenge);
-  const object = await bucket.get(key);
-  if (!object) return null;
-
-  const stored = (await object.json()) as {
+  const stored = await db.prepare(`SELECT challenge, type, user, expires_at
+    FROM runtime_auth_challenges WHERE drive_id = ? AND challenge_hash = ?`)
+    .bind(driveId, key).first<{
     challenge: string;
     type: "create" | "get";
     user: string;
-    expiresAt: number;
-  };
-  await bucket.delete(key);
+    expires_at: number;
+  }>();
+  if (!stored) return null;
+  await db.prepare("DELETE FROM runtime_auth_challenges WHERE drive_id = ? AND challenge_hash = ?")
+    .bind(driveId, key).run();
 
-  if (stored.challenge !== challenge || stored.type !== type || stored.expiresAt < Date.now()) {
+  if (stored.challenge !== challenge || stored.type !== type || stored.expires_at < Date.now()) {
     return null;
   }
   return stored;
 }
 
-async function listCredentials(bucket: R2Bucket) {
-  const credentials: StoredCredential[] = [];
-  const listed = await bucket.list({ prefix: CREDENTIAL_PREFIX });
-  for (const object of listed.objects) {
-    const stored = await bucket.get(object.key);
-    if (stored) credentials.push((await stored.json()) as StoredCredential);
+async function listCredentials(db: D1Database, driveId: string) {
+  const result = await db.prepare("SELECT * FROM runtime_passkeys WHERE drive_id = ?")
+    .bind(driveId).all<any>();
+  return result.results.map((row) => ({
+    id: row.id, user: row.user, publicKeyJwk: JSON.parse(row.public_key_jwk),
+    signCount: row.sign_count, createdAt: row.created_at,
+    name: row.name ?? undefined, lastUsedAt: row.last_used_at ?? undefined,
+  } as StoredCredential));
+}
+
+async function getCredential(db: D1Database, driveId: string, id: string) {
+  const row = await db.prepare("SELECT * FROM runtime_passkeys WHERE drive_id = ? AND id = ?")
+    .bind(driveId, id).first<any>();
+  return row ? ({
+    id: row.id, user: row.user, publicKeyJwk: JSON.parse(row.public_key_jwk),
+    signCount: row.sign_count, createdAt: row.created_at,
+    name: row.name ?? undefined, lastUsedAt: row.last_used_at ?? undefined,
+  } as StoredCredential) : null;
+}
+
+async function saveCredential(db: D1Database, driveId: string, credential: StoredCredential) {
+  await db.prepare(`INSERT INTO runtime_passkeys
+    (drive_id, id, user, public_key_jwk, sign_count, created_at, name, last_used_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (drive_id, id) DO UPDATE SET
+      user = excluded.user, public_key_jwk = excluded.public_key_jwk,
+      sign_count = excluded.sign_count, created_at = excluded.created_at,
+      name = excluded.name, last_used_at = excluded.last_used_at`)
+    .bind(driveId, credential.id, credential.user, JSON.stringify(credential.publicKeyJwk),
+      credential.signCount, credential.createdAt, credential.name ?? null,
+      credential.lastUsedAt ?? null).run();
+}
+
+function publicCredential(credential: StoredCredential) {
+  return {
+    id: credential.id,
+    name: credential.name || `Passkey · ${credential.id.slice(-6)}`,
+    createdAt: credential.createdAt,
+    lastUsedAt: credential.lastUsedAt ?? null,
+  };
+}
+
+async function handleListPasskeys(request: Request, env: AuthEnv, db: D1Database, driveId: string) {
+  if (!(await readSession(request, env))) {
+    return json({ error: "Unauthorized" }, { status: 401 });
   }
-  return credentials;
-}
-
-async function getCredential(bucket: R2Bucket, id: string) {
-  const object = await bucket.get(`${CREDENTIAL_PREFIX}${id}`);
-  return object ? ((await object.json()) as StoredCredential) : null;
-}
-
-async function saveCredential(bucket: R2Bucket, credential: StoredCredential) {
-  await bucket.put(`${CREDENTIAL_PREFIX}${credential.id}`, JSON.stringify(credential), {
-    httpMetadata: { contentType: "application/json" },
+  const credentials = await listCredentials(db, driveId);
+  return json({
+    passkeys: credentials
+      .map(publicCredential)
+      .sort((a, b) => b.createdAt - a.createdAt),
   });
+}
+
+async function handleRenamePasskey(
+  request: Request,
+  env: AuthEnv,
+  db: D1Database,
+  driveId: string,
+  id: string
+) {
+  if (!(await readSession(request, env))) {
+    return json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isSameOrigin(request)) return json({ error: "Invalid request origin" }, { status: 403 });
+  const stored = await getCredential(db, driveId, id);
+  if (!stored) return json({ error: "Passkey not found" }, { status: 404 });
+  const body = (await request.json()) as { name?: string };
+  const name = body.name?.trim();
+  if (!name || name.length > 64) {
+    return json({ error: "Name must be between 1 and 64 characters" }, { status: 400 });
+  }
+  const updated = { ...stored, name };
+  await saveCredential(db, driveId, updated);
+  return json({ passkey: publicCredential(updated) });
+}
+
+async function handleDeletePasskey(
+  request: Request,
+  env: AuthEnv,
+  db: D1Database,
+  driveId: string,
+  id: string
+) {
+  if (!(await readSession(request, env))) {
+    return json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isSameOrigin(request)) return json({ error: "Invalid request origin" }, { status: 403 });
+  const stored = await getCredential(db, driveId, id);
+  if (!stored) return json({ error: "Passkey not found" }, { status: 404 });
+  await db.prepare("DELETE FROM runtime_passkeys WHERE drive_id = ? AND id = ?")
+    .bind(driveId, id).run();
+  return json({ deleted: true });
 }
 
 class CborReader {
@@ -226,8 +310,8 @@ function derEcdsaToRaw(signature: Uint8Array) {
   return raw;
 }
 
-async function handleStatus(request: Request, env: AuthEnv, bucket: R2Bucket) {
-  const credentials = await listCredentials(bucket);
+async function handleStatus(request: Request, env: AuthEnv, db: D1Database, driveId: string) {
+  const credentials = await listCredentials(db, driveId);
   return json({
     authenticated: Boolean(await readSession(request, env)),
     passkeyAvailable: credentials.length > 0,
@@ -268,12 +352,12 @@ async function handlePasswordLogin(request: Request, env: AuthEnv) {
   );
 }
 
-async function handleRegisterOptions(request: Request, env: AuthEnv, bucket: R2Bucket) {
+async function handleRegisterOptions(request: Request, env: AuthEnv, db: D1Database, driveId: string) {
   const session = await readSession(request, env);
   if (!session) return json({ error: "Unauthorized" }, { status: 401 });
 
   const challenge = await randomChallenge();
-  await saveChallenge(bucket, challenge, "create", session.sub);
+  await saveChallenge(db, driveId, challenge, "create", session.sub);
 
   return json({
     challenge,
@@ -293,18 +377,19 @@ async function handleRegisterOptions(request: Request, env: AuthEnv, bucket: R2B
   });
 }
 
-async function handleRegisterVerify(request: Request, env: AuthEnv, bucket: R2Bucket) {
+async function handleRegisterVerify(request: Request, env: AuthEnv, db: D1Database, driveId: string) {
   const session = await readSession(request, env);
   if (!session) return json({ error: "Unauthorized" }, { status: 401 });
 
   const credential = (await request.json()) as {
     id: string;
     rawId: string;
+    name?: string;
     response: { clientDataJSON: string; attestationObject: string };
   };
   const clientData = await parseClientData(credential.response.clientDataJSON, "webauthn.create");
   if (!clientData) return json({ error: "Invalid credential" }, { status: 400 });
-  const challenge = await consumeChallenge(bucket, clientData.challenge, "create");
+  const challenge = await consumeChallenge(db, driveId, clientData.challenge, "create");
   if (!challenge || challenge.user !== session.sub) return json({ error: "Invalid challenge" }, { status: 400 });
 
   const attestationObject = new CborReader(base64UrlDecode(credential.response.attestationObject)).read() as Map<any, any>;
@@ -322,23 +407,24 @@ async function handleRegisterVerify(request: Request, env: AuthEnv, bucket: R2Bu
     return json({ error: "Credential ID mismatch" }, { status: 400 });
   }
 
-  await saveCredential(bucket, {
+  await saveCredential(db, driveId, {
     id: base64UrlEncode(parsed.credentialId),
     user: session.sub,
     publicKeyJwk: parsed.publicKeyJwk,
     signCount: parsed.signCount,
     createdAt: Date.now(),
+    name: credential.name?.trim().slice(0, 64) || undefined,
   });
 
   return json({ registered: true });
 }
 
-async function handleLoginOptions(request: Request, bucket: R2Bucket) {
-  const credentials = await listCredentials(bucket);
+async function handleLoginOptions(request: Request, db: D1Database, driveId: string) {
+  const credentials = await listCredentials(db, driveId);
   if (!credentials.length) return json({ error: "No passkeys registered" }, { status: 404 });
 
   const challenge = await randomChallenge();
-  await saveChallenge(bucket, challenge, "get", "");
+  await saveChallenge(db, driveId, challenge, "get", "");
 
   return json({
     challenge,
@@ -352,7 +438,7 @@ async function handleLoginOptions(request: Request, bucket: R2Bucket) {
   });
 }
 
-async function handleLoginVerify(request: Request, env: AuthEnv, bucket: R2Bucket) {
+async function handleLoginVerify(request: Request, env: AuthEnv, db: D1Database, driveId: string) {
   const credential = (await request.json()) as {
     id: string;
     rawId: string;
@@ -362,12 +448,12 @@ async function handleLoginVerify(request: Request, env: AuthEnv, bucket: R2Bucke
       signature: string;
     };
   };
-  const stored = await getCredential(bucket, credential.id);
+  const stored = await getCredential(db, driveId, credential.id);
   if (!stored) return json({ error: "Unknown credential" }, { status: 401 });
 
   const clientData = await parseClientData(credential.response.clientDataJSON, "webauthn.get");
   if (!clientData) return json({ error: "Invalid credential" }, { status: 400 });
-  const challenge = await consumeChallenge(bucket, clientData.challenge, "get");
+  const challenge = await consumeChallenge(db, driveId, clientData.challenge, "get");
   if (!challenge) return json({ error: "Invalid challenge" }, { status: 400 });
 
   const authenticatorData = base64UrlDecode(credential.response.authenticatorData);
@@ -402,9 +488,11 @@ async function handleLoginVerify(request: Request, env: AuthEnv, bucket: R2Bucke
   if (parsed.signCount !== 0 && stored.signCount !== 0 && parsed.signCount <= stored.signCount) {
     return json({ error: "Authenticator sign counter regression" }, { status: 401 });
   }
-  if (parsed.signCount > stored.signCount) {
-    await saveCredential(bucket, { ...stored, signCount: parsed.signCount });
-  }
+  await saveCredential(db, driveId, {
+    ...stored,
+    signCount: Math.max(stored.signCount, parsed.signCount),
+    lastUsedAt: Date.now(),
+  });
 
   return json(
     { authenticated: true },
@@ -414,11 +502,13 @@ async function handleLoginVerify(request: Request, env: AuthEnv, bucket: R2Bucke
 
 export const onRequest: PagesFunction<AuthEnv> = async function (context) {
   const path = pathFromContext(context);
-  const bucket = getAuthBucket(context);
-  if (!bucket) return json({ error: "Storage bucket is not configured" }, { status: 500 });
+  let db: D1Database;
+  try { db = getDatabase(context.env); }
+  catch (error) { return json({ error: (error as Error).message }, { status: 500 }); }
+  const driveId = driveIdFromRequest(context.request, context.env);
 
   if (context.request.method === "GET" && path === "session") {
-    return handleStatus(context.request, context.env, bucket);
+    return handleStatus(context.request, context.env, db, driveId);
   }
   if (context.request.method === "POST" && path === "login/password") {
     return handlePasswordLogin(context.request, context.env);
@@ -427,16 +517,28 @@ export const onRequest: PagesFunction<AuthEnv> = async function (context) {
     return json({ authenticated: false }, { headers: { "Set-Cookie": clearSessionCookie() } });
   }
   if (context.request.method === "POST" && path === "passkey/register/options") {
-    return handleRegisterOptions(context.request, context.env, bucket);
+    return handleRegisterOptions(context.request, context.env, db, driveId);
   }
   if (context.request.method === "POST" && path === "passkey/register/verify") {
-    return handleRegisterVerify(context.request, context.env, bucket);
+    return handleRegisterVerify(context.request, context.env, db, driveId);
   }
   if (context.request.method === "POST" && path === "passkey/login/options") {
-    return handleLoginOptions(context.request, bucket);
+    return handleLoginOptions(context.request, db, driveId);
   }
   if (context.request.method === "POST" && path === "passkey/login/verify") {
-    return handleLoginVerify(context.request, context.env, bucket);
+    return handleLoginVerify(context.request, context.env, db, driveId);
+  }
+  if (context.request.method === "GET" && path === "passkeys") {
+    return handleListPasskeys(context.request, context.env, db, driveId);
+  }
+  if (path.startsWith("passkeys/")) {
+    const id = path.slice("passkeys/".length);
+    if (context.request.method === "PATCH") {
+      return handleRenamePasskey(context.request, context.env, db, driveId, id);
+    }
+    if (context.request.method === "DELETE") {
+      return handleDeletePasskey(context.request, context.env, db, driveId, id);
+    }
   }
 
   return json({ error: "Not found" }, { status: 404 });

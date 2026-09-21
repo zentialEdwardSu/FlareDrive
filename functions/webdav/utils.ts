@@ -1,25 +1,13 @@
 /// <reference types="@cloudflare/workers-types" />
 export interface RequestHandlerParams {
   bucket: R2Bucket;
+  db: D1Database;
+  driveId: string;
   path: string;
   request: Request;
 }
-
 export const WEBDAV_ENDPOINT = "/webdav/";
 export const INTERNAL_PREFIX = "_$flaredrive$/";
-
-export const ROOT_OBJECT = {
-  key: "",
-  uploaded: new Date(),
-  httpMetadata: {
-    contentType: "application/x-directory",
-    contentDisposition: undefined,
-    contentLanguage: undefined,
-  },
-  customMetadata: undefined,
-  size: 0,
-  etag: undefined,
-};
 
 export async function generateTOTP(secretBase32: string, forTime?: number, digits = 6) {
   const step = 30;
@@ -102,10 +90,6 @@ export function escapeXml(value: string) {
     .replace(/'/g, "&apos;");
 }
 
-export function isDirectoryObject(object: Pick<R2Object, "httpMetadata"> | typeof ROOT_OBJECT) {
-  return object.httpMetadata?.contentType === "application/x-directory";
-}
-
 export function isInternalPath(path: string) {
   return path.startsWith(INTERNAL_PREFIX);
 }
@@ -138,15 +122,6 @@ export function applySafeObjectHeaders(headers: Headers) {
     headers.set("Content-Security-Policy", "sandbox");
   }
 }
-
-export function randomShareToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  let binary = "";
-  bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
 
 export function notFound() {
   return new Response("Not found", { status: 404 });
@@ -192,29 +167,4 @@ export function parseBucketPath(context: any): [R2Bucket, string] {
   const driveid = url.hostname.replace(/\..*/, "");
 
   return [env[driveid] || env["BUCKET"], path];
-}
-
-export async function* listAll(
-  bucket: R2Bucket,
-  prefix?: string,
-  isRecursive: boolean = false
-) {
-  let cursor: string | undefined = undefined;
-  let truncated = false;
-
-  do {
-    const r2Objects = await bucket.list({
-      prefix: prefix,
-      delimiter: isRecursive ? undefined : "/",
-      cursor: cursor,
-      // @ts-ignore
-      include: ["httpMetadata", "customMetadata"],
-    });
-
-    for await (const obj of r2Objects.objects)
-      if (!isInternalPath(obj.key)) yield obj;
-
-    truncated = r2Objects.truncated;
-    cursor = truncated ? (r2Objects as any).cursor : undefined;
-  } while (truncated);
 }

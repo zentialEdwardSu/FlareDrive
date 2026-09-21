@@ -1,10 +1,19 @@
 import pLimit from "p-limit";
 
+import {
+  getIndexedObject,
+  listIndexedObjects,
+  parentPath,
+  upsertObject,
+} from "../db";
+import { handleRequestDelete } from "./delete";
 import { notFound } from "./utils";
-import { listAll, RequestHandlerParams, WEBDAV_ENDPOINT } from "./utils";
+import { RequestHandlerParams, WEBDAV_ENDPOINT } from "./utils";
 
 export async function handleRequestCopy({
   bucket,
+  db,
+  driveId,
   path,
   request,
 }: RequestHandlerParams) {
@@ -23,20 +32,31 @@ export async function handleRequestCopy({
   const destination = decodedPathname.slice(WEBDAV_ENDPOINT.length);
 
   if (
+    !destination ||
     destination === path ||
+    path.startsWith(destination + "/") ||
     (src.httpMetadata?.contentType === "application/x-directory" &&
       destination.startsWith(path + "/"))
   )
     return new Response("Bad Request", { status: 400 });
 
   // Check if the destination already exists
-  const destinationExists = await bucket.head(destination);
+  const destinationExists = await getIndexedObject(db, driveId, destination);
   if (dontOverwrite && destinationExists)
     return new Response("Precondition Failed", { status: 412 });
-  await bucket.put(destination, src.body, {
+  const destinationParent = parentPath(destination);
+  if (destinationParent) {
+    const parent = await getIndexedObject(db, driveId, destinationParent);
+    if (!parent?.isDirectory) return new Response("Conflict", { status: 409 });
+  }
+  if (destinationExists) {
+    await handleRequestDelete({ bucket, db, driveId, path: destination, request });
+  }
+  const destinationObject = await bucket.put(destination, src.body, {
     httpMetadata: src.httpMetadata,
     customMetadata: src.customMetadata,
   });
+  await upsertObject(db, driveId, destinationObject);
 
   const isDirectory =
     src.httpMetadata?.contentType === "application/x-directory";
@@ -47,20 +67,19 @@ export async function handleRequestCopy({
         break;
       case "infinity": {
         const prefix = path + "/";
-        const copy = async (object: R2Object) => {
-          const target = `${destination}/${object.key.slice(prefix.length)}`;
-          const src = await bucket.get(object.key);
-          if (src === null) return;
-          await bucket.put(target, src.body, {
-            httpMetadata: object.httpMetadata,
-            customMetadata: object.customMetadata,
+        const children = await listIndexedObjects(db, driveId, path, true);
+        const copy = async (object: (typeof children)[number]) => {
+          const target = `${destination}/${object.path.slice(prefix.length)}`;
+          const sourceObject = await bucket.get(object.path);
+          if (sourceObject === null) return;
+          const copiedObject = await bucket.put(target, sourceObject.body, {
+            httpMetadata: sourceObject.httpMetadata,
+            customMetadata: sourceObject.customMetadata,
           });
+          await upsertObject(db, driveId, copiedObject);
         };
         const limit = pLimit(5);
-        const promises = [];
-        for await (const object of listAll(bucket, prefix, true)) {
-          promises.push(limit(() => copy(object)));
-        }
+        const promises = children.map((object) => limit(() => copy(object)));
         await Promise.all(promises);
         break;
       }
@@ -69,7 +88,7 @@ export async function handleRequestCopy({
     }
   }
 
-  if (destinationExists) {
+  if (destinationExists !== null) {
     return new Response(null, { status: 204 });
   } else {
     return new Response("", { status: 201 });

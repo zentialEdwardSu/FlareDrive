@@ -3,6 +3,13 @@ export type AuthSession = {
   passkeyAvailable: boolean;
 };
 
+export type PasskeySummary = {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+};
+
 type RegistrationOptions = Omit<PublicKeyCredentialCreationOptions, "challenge" | "user"> & {
   challenge: string;
   user: Omit<PublicKeyCredentialUserEntity, "id"> & { id: string };
@@ -88,7 +95,7 @@ export async function logout() {
   await authFetch("logout", { method: "POST" });
 }
 
-export async function registerPasskey() {
+export async function registerPasskey(name?: string) {
   if (!window.PublicKeyCredential) throw new Error("Passkeys are not supported by this browser");
 
   const options = (await authFetch("passkey/register/options", { method: "POST" }).then((res) =>
@@ -105,8 +112,25 @@ export async function registerPasskey() {
   if (!credential) throw new Error("Passkey registration was cancelled");
   await authFetch("passkey/register/verify", {
     method: "POST",
-    body: JSON.stringify(credentialToJSON(credential)),
+    body: JSON.stringify({ ...credentialToJSON(credential), name }),
   });
+}
+
+export async function listPasskeys() {
+  const response = await authFetch("passkeys");
+  return response.json() as Promise<{ passkeys: PasskeySummary[] }>;
+}
+
+export async function renamePasskey(id: string, name: string) {
+  const response = await authFetch(`passkeys/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+  return response.json() as Promise<{ passkey: PasskeySummary }>;
+}
+
+export async function deletePasskey(id: string) {
+  await authFetch(`passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function passkeyLogin() {

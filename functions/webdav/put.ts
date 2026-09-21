@@ -1,4 +1,5 @@
-import { RequestHandlerParams, ROOT_OBJECT } from "./utils";
+import { RequestHandlerParams } from "./utils";
+import { getIndexedObject, upsertObject } from "../db";
 
 async function handleRequestPutMultipart({
   bucket,
@@ -24,14 +25,11 @@ async function handleRequestPutMultipart({
   });
 }
 
-export async function handleRequestPut({
-  bucket,
-  path,
-  request,
-}: RequestHandlerParams) {
+export async function handleRequestPut(params: RequestHandlerParams) {
+  const { bucket, db, driveId, path, request } = params;
   const searchParams = new URLSearchParams(new URL(request.url).search);
   if (searchParams.has("uploadId")) {
-    return handleRequestPutMultipart({ bucket, path, request });
+    return handleRequestPutMultipart(params);
   }
 
   if (request.url.endsWith("/")) {
@@ -41,9 +39,10 @@ export async function handleRequestPut({
   // Check if the parent directory exists
   if (!path.startsWith("_$flaredrive$/")) {
     const parentPath = path.replace(/(\/|^)[^/]*$/, "");
-    const parentDir =
-      parentPath === "" ? ROOT_OBJECT : await bucket.head(parentPath);
-    if (parentDir === null) return new Response("Conflict", { status: 409 });
+    if (parentPath !== "") {
+      const parentDir = await getIndexedObject(db, driveId, parentPath);
+      if (!parentDir?.isDirectory) return new Response("Conflict", { status: 409 });
+    }
   }
 
   const thumbnail = request.headers.get("fd-thumbnail");
@@ -56,6 +55,7 @@ export async function handleRequestPut({
   });
 
   if (!result) return new Response("Preconditions failed", { status: 412 });
+  await upsertObject(db, driveId, result);
 
   return new Response("", { status: 201 });
 }

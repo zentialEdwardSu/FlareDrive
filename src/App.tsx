@@ -12,8 +12,10 @@ import Header from "./Header";
 import Login from "./Login";
 import Main from "./Main";
 import ProgressDialog from "./ProgressDialog";
+import PasskeyManager from "./PasskeyManager";
+import { ShareManager } from "./ShareDialogs";
 import { TransferQueueProvider } from "./app/transferQueue";
-import { AuthSession, getAuthSession, logout, registerPasskey } from "./app/auth";
+import { AuthSession, getAuthSession, logout } from "./app/auth";
 import { clearThumbnailCache } from "./app/thumbnailCacheServiceWorker";
 
 const globalStyles = (
@@ -56,6 +58,8 @@ function App() {
   const [showProgressDialog, setShowProgressDialog] = React.useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [showShares, setShowShares] = useState(false);
+  const [showPasskeys, setShowPasskeys] = useState(false);
 
   const refreshAuthSession = () => {
     getAuthSession()
@@ -64,15 +68,6 @@ function App() {
   };
 
   useEffect(refreshAuthSession, []);
-
-  const handleRegisterPasskey = async () => {
-    try {
-      await registerPasskey();
-      refreshAuthSession();
-    } catch (error) {
-      setError(error as Error);
-    }
-  };
 
   const handleLogout = async () => {
     try {
@@ -95,7 +90,8 @@ function App() {
               search={search}
               onSearchChange={(newSearch: string) => setSearch(newSearch)}
               setShowProgressDialog={setShowProgressDialog}
-              onRegisterPasskey={handleRegisterPasskey}
+              onManageShares={() => setShowShares(true)}
+              onManagePasskeys={() => setShowPasskeys(true)}
               onLogout={handleLogout}
             />
             <Main search={search} onError={setError} />
@@ -117,6 +113,12 @@ function App() {
           open={showProgressDialog}
           onOpen={() => setShowProgressDialog(true)}
           onClose={() => setShowProgressDialog(false)}
+        />
+        <ShareManager open={showShares} onClose={() => setShowShares(false)} />
+        <PasskeyManager
+          open={showPasskeys}
+          onClose={() => setShowPasskeys(false)}
+          onChanged={refreshAuthSession}
         />
       </TransferQueueProvider>
     </ThemeProvider>
