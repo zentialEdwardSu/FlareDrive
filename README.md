@@ -40,8 +40,10 @@ Steps:
 2. Apply the D1 schema from [`migrations/0001_runtime.sql`](migrations/0001_runtime.sql). With Wrangler, run:
 
    ```bash
-   npx wrangler d1 migrations apply <database-name> --remote
+   npx wrangler d1 migrations apply <database-name> --remote --config wrangler.migrations.jsonc
    ```
+
+   `wrangler.migrations.jsonc` is only used by migration commands. FlareDrive intentionally does not include a root `wrangler.jsonc`, so Cloudflare Pages continues to use the variables and bindings configured in the Dashboard.
 
 3. After the initial deployment, add these Cloudflare Pages bindings:
    - Bind the R2 bucket to `BUCKET`.

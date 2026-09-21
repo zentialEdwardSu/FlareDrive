@@ -1,23 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "flaredrive",
+  "name": "flaredrive-database-migrations",
   "compatibility_date": "2026-09-21",
-  "pages_build_output_dir": "./build",
-  "vars": {
-    "DRIVE_ID": "flaredrive"
-  },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "flaredrive-runtime",
       "database_id": "107f03e6-bf89-4118-ae2b-24f7e5ef34cc",
       "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "BUCKET",
-      "bucket_name": "buck-for-driver"
     }
   ]
 }
